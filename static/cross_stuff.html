@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross stuffing · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Cross stuffing</h1>
+    <nav><a href="/">Yard</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+      <div class="row">
+        <div class="field"><label for="time" class="req">Start time</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+        <div class="field"><label for="end" class="req">End time</label><input type="time" id="end" required /><div class="err" id="endErr"></div></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Original container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cargo went to</legend>
+      <div class="field">
+        <label for="target" class="req">Transferred to</label>
+        <select id="target" required></select>
+        <div class="err" id="targetErr"></div>
+      </div>
+      <div class="field" id="newContainerField" hidden>
+        <label for="newContainer" class="req">New container number</label>
+        <input id="newContainer" maxlength="11" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="MSKU6856622" />
+        <div class="hint">Must already be in the yard</div>
+        <div class="err" id="newContainerErr"></div>
+      </div>
+      <div class="field">
+        <label class="check"><input type="checkbox" id="emptied" /> Original container emptied after the service</label>
+        <div class="hint">Sets its cargo status to Empty; the new container (if any) becomes Full</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="What was stripped, condition, anything the next step should know"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+
+    <button type="submit" id="submit" class="primary">Record cross stuffing</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert, NUMBER_RE } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Any container currently in the yard") + Yard.unlistedHTML(false);
+  const pick = Yard.picker({ unlisted: { kind: "cross_stuff" }, onSelect: () => $("target").focus() });
+
+  const CONTAINER_TARGET = "Container";
+  function syncTarget() {
+    const toContainer = $("target").value === CONTAINER_TARGET;
+    $("newContainerField").hidden = !toContainer;
+    if (!toContainer) { $("newContainer").value = ""; setError("newContainer", ""); }
+  }
+  $("target").addEventListener("change", syncTarget);
+
+  function endISO() {
+    return new Date($("date").value + "T" + $("end").value).toISOString();
+  }
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Start time is required",
+                              end: "End time is required", target: "Choose where the cargo went" });
+    if (!pick.require()) ok = false;
+
+    const toContainer = $("target").value === CONTAINER_TARGET;
+    const newNum = $("newContainer").value.trim().toUpperCase();
+    if (toContainer) {
+      if (!newNum) { setError("newContainer", "New container number is required"); ok = false; }
+      else if (!NUMBER_RE.test(newNum)) { setError("newContainer", "4 letters then 7 digits"); ok = false; }
+      else if (newNum === pick.number()) { setError("newContainer", "Same as the original container"); ok = false; }
+    }
+    if ($("time").value && $("end").value && $("end").value < $("time").value) {
+      setError("end", "End time is before the start time"); ok = false;
+    }
+    if (!ok) return null;
+
+    return pick.wrap({
+      at: atISO(), ended_at: endISO(), comments: $("comments").value.trim(),
+      container_number: pick.number(), target: $("target").value,
+      new_container_number: toContainer ? newNum : null,
+      original_emptied: $("emptied").checked,
+    });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/cross-stuff", (d) => {
+    const e = d.last_event;
+    receipt(d.container.number, [
+      ["Stripped", `${Yard.fmt(e.at)} → ${new Date(e.ended_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`],
+      ["To", e.cross_stuff_target + (e.new_container_number ? ` · ${e.new_container_number}` : "")],
+      ["Original now", d.cargo_status || "–"],
+    ]);
+    resetKeepingTime("form", () => { pick.reset(); syncTarget(); $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("target"), o.cross_stuff_targets, "Select");
+    Yard.fillUnlisted(o);
+    syncTarget();
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

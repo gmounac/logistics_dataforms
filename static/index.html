@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+</head>
+<body>
+<main class="wide">
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Container Yard</h1>
+    <nav><a href="/events">Records</a> <a href="/docs">API</a></nav>
+  </header>
+
+  <div id="alert" class="alert" role="alert"></div>
+
+  <section aria-labelledby="actionsTitle">
+    <fieldset>
+      <legend id="actionsTitle">Record</legend>
+      <div class="actions">
+        <a href="/gate-in"><b>Gate in</b><small>Container arriving at the yard</small></a>
+        <a href="/gate-out"><b>Gate out</b><small>Container leaving the yard</small></a>
+        <a href="/plug-in"><b>Plug in</b><small>Loaded reefer onto a generator</small></a>
+        <a href="/plug-out"><b>Plug out</b><small>Loaded reefer off power</small></a>
+        <a href="/pti-plug"><b>PTI plug</b><small>Start a pre-trip inspection</small></a>
+        <a href="/pti-unplug"><b>PTI unplug</b><small>Finish a PTI, record the sticker</small></a>
+        <a href="/cleaning"><b>Cleaning</b><small>Wash and inspection result</small></a>
+        <a href="/temperature"><b>Temperature round</b><small>Reading on a plugged reefer</small></a>
+        <a href="/cross-stuff"><b>Cross stuffing</b><small>Cargo stripped from a container</small></a>
+        <a href="/shifting"><b>Shifting</b><small>Containers moved within the yard</small></a>
+      </div>
+    </fieldset>
+  </section>
+
+  <section aria-labelledby="attentionTitle" id="attention" class="attention" hidden>
+    <fieldset>
+      <legend id="attentionTitle">Needs attention</legend>
+      <div class="hint" style="margin-bottom:8px">Forms submitted for containers that weren't where the yard expected them. Record the missing gate in, re-enter the event, then mark as sorted.</div>
+      <ul id="attentionList"></ul>
+    </fieldset>
+  </section>
+
+  <section aria-labelledby="onsiteTitle">
+    <fieldset>
+      <legend id="onsiteTitle">In the yard now</legend>
+      <div class="count"><span id="count">–</span><small id="countNote"></small></div>
+      <div class="toolbar">
+        <input id="q" placeholder="Filter by container number" autocomplete="off" autocapitalize="characters" />
+        <label><input type="checkbox" id="reefersOnly" /> Reefers only</label>
+        <label><input type="checkbox" id="pluggedOnly" /> Plugged in</label>
+      </div>
+      <div class="scroll"><table>
+        <thead>
+          <tr>
+            <th>Container</th>
+            <th>Type</th>
+            <th class="hide-sm">Line</th>
+            <th>Arrived</th>
+            <th>Cargo</th>
+            <th class="hide-sm">PTI</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </fieldset>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let ALL = [];
+
+  function typeLabel(c) {
+    const size = c.size === "TEU" ? "20'" : "40'";
+    return c.container_type === "Dry" ? `Dry ${size}` : `${c.reefer_type} ${size}`;
+  }
+
+  function arrivedLabel(st) {
+    if (!st.arrived_at) return "–";
+    const when = new Date(st.arrived_at);
+    const today = new Date();
+    const sameDay = when.toDateString() === today.toDateString();
+    const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return sameDay ? time : when.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + time;
+  }
+
+  function render() {
+    const q = $("q").value.trim().toUpperCase();
+    const reefers = $("reefersOnly").checked;
+    const plugged = $("pluggedOnly").checked;
+    const rows = ALL.filter((st) =>
+      (!q || st.container.number.includes(q)) &&
+      (!reefers || st.container.container_type === "Reefer") &&
+      (!plugged || st.is_plugged)
+    );
+
+    const tbody = $("rows");
+    tbody.innerHTML = "";
+    if (!rows.length) {
+      const tr = document.createElement("tr");
+      tr.className = "empty-row";
+      tr.innerHTML = `<td colspan="6">${ALL.length ? "No container matches the filter" : "The yard is empty"}</td>`;
+      tbody.appendChild(tr);
+    }
+    for (const st of rows) {
+      const c = st.container;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="num"></td>
+        <td></td>
+        <td class="hide-sm"></td>
+        <td></td>
+        <td></td>
+        <td class="hide-sm"></td>`;
+      const td = tr.querySelectorAll("td");
+      td[0].textContent = c.number;
+      td[1].textContent = typeLabel(c);
+      if (c.unit_manufacturer) td[1].insertAdjacentHTML("beforeend", `<span class="sub"></span>`), td[1].querySelector(".sub").textContent = c.unit_manufacturer;
+      td[2].textContent = c.shipping_line;
+      td[3].textContent = arrivedLabel(st);
+      td[4].textContent = st.cargo_status || "–";
+      if (st.is_plugged) td[4].insertAdjacentHTML("beforeend", ` <span class="tag plug">plugged</span>`);
+      td[5].textContent = st.pti_status || "–";
+      tbody.appendChild(tr);
+    }
+
+    $("count").textContent = ALL.length;
+    const reefersCount = ALL.filter((s) => s.container.container_type === "Reefer").length;
+    const pluggedCount = ALL.filter((s) => s.is_plugged).length;
+    $("countNote").textContent = ALL.length
+      ? `${reefersCount} reefer${reefersCount === 1 ? "" : "s"}, ${pluggedCount} plugged in`
+      : "";
+  }
+
+  const KIND_LABEL = { gate_in: "Gate in", gate_out: "Gate out", plug_in: "Plug in", plug_out: "Plug out", cleaning: "Cleaning", temperature: "Temperature" };
+
+  function renderAttention(items) {
+    const sec = $("attention"), ul = $("attentionList");
+    sec.hidden = !items.length;
+    ul.innerHTML = "";
+    for (const it of items) {
+      const li = document.createElement("li");
+      const details = Object.entries(it.details || {}).filter(([, v]) => v !== null && v !== "").map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(" · ");
+      li.innerHTML = `<div><span class="num"></span> <span class="meta"></span></div><button class="ghost">Mark sorted</button><div class="sub"></div>`;
+      li.querySelector(".num").textContent = it.container_number;
+      li.querySelector(".meta").textContent = `— ${KIND_LABEL[it.kind] || it.kind} at ${new Date(it.at).toLocaleString()}` + (it.check_digit_ok ? "" : " · number check failed");
+      li.querySelector(".sub").textContent = [details, it.comments].filter(Boolean).join(" — ");
+      li.querySelector("button").addEventListener("click", async () => {
+        const r = await fetch(`/api/unmatched/${it.id}/resolve`, { method: "POST" });
+        if (r.ok) load(); else { const a = $("alert"); a.className = "alert show bad"; a.textContent = "Could not mark as sorted."; }
+      });
+      ul.appendChild(li);
+    }
+  }
+
+  async function load() {
+    try {
+      const [r, u] = await Promise.all([fetch("/api/yard/on-site?limit=1000"), fetch("/api/unmatched")]);
+      if (!r.ok) throw new Error(r.statusText);
+      ALL = await r.json();
+      render();
+      if (u.ok) renderAttention(await u.json());
+    } catch {
+      const a = $("alert");
+      a.className = "alert show bad";
+      a.textContent = "Could not load the yard. Is the server running?";
+    }
+  }
+
+  ["q", "reefersOnly", "pluggedOnly"].forEach((id) => $(id).addEventListener("input", render));
+  document.addEventListener("DOMContentLoaded", load);
+  // refresh when the tab regains focus, e.g. after recording a gate in on another tab
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>

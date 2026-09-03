@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PTI plug · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>PTI plug</h1>
+    <nav><a href="/">Yard</a> <a href="/pti-unplug">PTI unplug</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time plugged</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Pre-trip inspection</legend>
+      <div class="row">
+        <div class="field"><label for="generator" class="req">Generator</label><select id="generator" required></select><div class="err" id="generatorErr"></div></div>
+        <div class="field"><label for="setPoint" class="req">Set point °C</label><input type="number" id="setPoint" step="0.5" min="-70" max="30" placeholder="-25" required /><div class="err" id="setPointErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="Unit condition, faults noticed at start of the PTI"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record PTI plug</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Reefers in the yard that are not plugged in") + Yard.unlistedHTML(true);
+  const pick = Yard.picker({
+    filter: { reefer: true, plugged: false },
+    unlisted: { kind: "plug_in" },
+    onSelect: (st) => {
+      const min = { "Standard": -25, "Magnum": -35, "Magnum +": -35, "S Freezer": -60 }[st.container.reefer_type];
+      $("setPoint").min = min;
+      $("setPoint").placeholder = min;
+      $("generator").focus();
+    },
+  });
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required", generator: "Choose a generator", setPoint: "Set point is required" });
+    if (!pick.require()) ok = false;
+    if (!ok) return null;
+    return pick.wrap({ at: atISO(), comments: $("comments").value.trim(), container_number: pick.number(),
+             purpose: "PTI", generator: $("generator").value, set_point_c: Number($("setPoint").value) });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/plug-in", (d) => {
+    const p = d.plugged_in;
+    receipt(d.container.number, [["Plugged", Yard.fmt(p.at)], ["Generator", p.generator], ["Set point", p.set_point_c + " °C"]]);
+    resetKeepingTime("form", () => { pick.reset(); $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("generator"), o.generators);
+    Yard.fillUnlisted(o);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

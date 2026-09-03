@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PTI unplug · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>PTI unplug</h1>
+    <nav><a href="/">Yard</a> <a href="/pti-plug">PTI plug</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time unplugged</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Result</legend>
+      <div class="field">
+        <label for="sticker" class="req">Sticker placed on unit</label>
+        <select id="sticker" required></select>
+        <div class="hint">PASS marks the container as PTI; RED, TBR or NA as NON PTI</div>
+        <div class="err" id="stickerErr"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="Faults found, repairs needed, why it failed"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record PTI unplug</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Reefers plugged in for a PTI") + Yard.unlistedHTML(true);
+  const pick = Yard.picker({
+    filter: { plugged: true, purpose: "PTI" },
+    unlisted: { kind: "plug_out" },
+    onSelect: () => $("sticker").focus(),
+  });
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required", sticker: "Choose the sticker placed on the unit" });
+    if (!pick.require()) ok = false;
+    if (!ok) return null;
+    return pick.wrap({ at: atISO(), comments: $("comments").value.trim(), container_number: pick.number(),
+             sticker: $("sticker").value });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/plug-out", (d) => {
+    receipt(d.container.number, [["Unplugged", Yard.fmt(d.last_event.at)], ["Sticker", d.last_event.sticker], ["Now", d.pti_status]]);
+    resetKeepingTime("form", () => { pick.reset(); $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("sticker"), o.stickers);
+    Yard.fillUnlisted(o);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

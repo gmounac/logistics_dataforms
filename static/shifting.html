@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shifting · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Shifting</h1>
+    <nav><a href="/">Yard</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Job</legend>
+      <div class="field">
+        <label for="customer" class="req">Customer</label>
+        <select id="customer" required></select>
+        <div class="err" id="customerErr"></div>
+      </div>
+      <div class="field">
+        <label for="remarks" class="req">What was done</label>
+        <input id="remarks" placeholder="e.g. Moved to bay 4 to clear access for MSKU6856622" required />
+        <div class="err" id="remarksErr"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Containers moved</legend>
+      <div class="field">
+        <div class="numbers" id="numbers"></div>
+        <div class="err" id="numbersErr"></div>
+        <div class="hint">Any container can be listed, whether or not it has a gate in on record</div>
+        <button type="button" class="ghost" id="addNumber" style="margin-top:10px">+ Add another container</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+
+    <button type="submit" id="submit" class="primary">Record shifting</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert, NUMBER_RE } = Yard;
+  const numbers = $("numbers");
+
+  function addRow(focus = true) {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<input autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="11" placeholder="MSKU6856622" />
+                      <button type="button" class="ghost remove" aria-label="Remove">Remove</button>`;
+    item.querySelector(".remove").addEventListener("click", () => {
+      if (numbers.children.length > 1) item.remove(); else item.querySelector("input").value = "";
+    });
+    item.querySelector("input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); addRow(); }
+    });
+    numbers.appendChild(item);
+    if (focus) item.querySelector("input").focus();
+  }
+  $("addNumber").addEventListener("click", () => addRow());
+
+  function collect() {
+    return [...numbers.querySelectorAll("input")].map((i) => i.value.trim().toUpperCase()).filter(Boolean);
+  }
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required", customer: "Choose a customer", remarks: "Say what was done" });
+    const list = collect();
+    setError("numbers", "");
+    if (!list.length) { setError("numbers", "List at least one container"); ok = false; }
+    const bad = list.filter((n) => !NUMBER_RE.test(n));
+    if (bad.length) { setError("numbers", "Not container numbers: " + bad.join(", ")); ok = false; }
+    if (new Set(list).size !== list.length) { setError("numbers", "The same container is listed twice"); ok = false; }
+    if (!ok) return null;
+    return { at: atISO(), comments: $("comments").value.trim(), customer: $("customer").value,
+             remarks: $("remarks").value.trim(), container_numbers: list };
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/shifting", (d) => {
+    receipt(`${d.container_numbers.length} container${d.container_numbers.length === 1 ? "" : "s"}`,
+            [["Moved", Yard.fmt(d.at)], ["For", d.customer], ["Containers", d.container_numbers.join(", ")], ["Job", d.remarks]]);
+    resetKeepingTime("form", () => { numbers.innerHTML = ""; addRow(false); $("customer").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    addRow(false);
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("customer"), o.customers);
+    $("customer").focus();
+  })();
+</script>
+</body>
+</html>

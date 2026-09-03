@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Temperature round · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Temperature round</h1>
+    <nav><a href="/">Yard</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="slot" class="req">Round</label><select id="slot" required></select><div class="err" id="slotErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Reading</legend>
+      <div class="row">
+        <div class="field"><label for="setPoint" class="req">Set point °C</label><input type="number" id="setPoint" step="0.5" required /><div class="hint" id="setPointHint"></div><div class="err" id="setPointErr"></div></div>
+        <div class="field"><label for="remark" class="req">Remark</label><select id="remark" required></select><div class="err" id="remarkErr"></div></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="sup" class="req">Supply °C</label><input type="number" id="sup" step="0.1" required /><div class="err" id="supErr"></div></div>
+        <div class="field"><label for="ret" class="req">Return °C</label><input type="number" id="ret" step="0.1" required /><div class="err" id="retErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="Required for alarms: what the unit showed and what was done"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record reading</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Reefers currently plugged in") + Yard.unlistedHTML(true);
+  const pick = Yard.picker({
+    filter: { plugged: true },
+    unlisted: { kind: "temperature" },
+    onSelect: (st) => { $("setPoint").value = st.plugged_in.set_point_c; $("setPointHint").textContent = `Plug-in record says ${st.plugged_in.set_point_c} °C — change it if the unit shows something else`; $("sup").focus(); },
+  });
+  $("remark").addEventListener("change", () => $("commentsLabel").classList.toggle("req", $("remark").value === "Alarm" || $("comments").required));
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", slot: "Choose the round", setPoint: "Set point is required",
+                              sup: "Supply temperature is required", ret: "Return temperature is required", remark: "Choose a remark" });
+    if (!pick.require()) ok = false;
+    if ($("remark").value === "Alarm" && !$("comments").value.trim()) { setError("comments", "Describe the alarm"); ok = false; }
+    if (!ok) return null;
+    const hour = { AM: 8, NOON: 12, PM: 16 }[$("slot").value];
+    const at = new Date($("date").value + "T" + String(hour).padStart(2, "0") + ":00").toISOString();
+    return pick.wrap({ at, time_slot: $("slot").value, comments: $("comments").value.trim(), container_number: pick.number(),
+             set_point_c: Number($("setPoint").value), supply_temp_c: Number($("sup").value),
+             return_temp_c: Number($("ret").value), remark: $("remark").value });
+  }
+
+  // /api/temperature returns the reading itself (its own table), not a StateOut
+  Yard.onSubmit("form", "submit", build, "/api/temperature", (r) => {
+    receipt(r.container_number, [
+      ["Round", `${r.time_slot}, ${new Date(r.at).toLocaleDateString()}`],
+      ["Supply / Return", `${r.supply_temp_c} / ${r.return_temp_c} °C`],
+      ["Remark", r.temperature_remark]]);
+    const slot = $("slot").value;
+    resetKeepingTime("form", () => { pick.reset(); $("slot").value = slot; $("setPointHint").textContent = ""; $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime("date", null);
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("remark"), o.temperature_remarks);
+    fill($("slot"), o.time_slots, "Select");
+    const h = new Date().getHours();
+    $("slot").value = h < 11 ? "AM" : h < 15 ? "NOON" : "PM";
+    Yard.fillUnlisted(o);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

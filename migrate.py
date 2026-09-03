@@ -1,0 +1,76 @@
+"""Schema fix-ups that `Base.metadata.create_all` can't do on an existing DB.
+
+`init_db` only *creates* missing tables (so the new `temperature_readings`
+table appears on the next server start on its own); it never ALTERs a table
+that already exists, and it never moves data. Run this once against an
+existing yard.db after pulling schema changes:
+
+    uv run migrate.py            # operates on yard.db
+    uv run migrate.py other.db
+
+It is idempotent.
+"""
+
+import sqlite3
+import sys
+
+# table -> {column: SQLite column type}
+ADDITIONS: dict[str, dict[str, str]] = {
+    "events": {
+        "ended_at": "DATETIME",
+        "cross_stuff_target": "VARCHAR",
+        "new_container_number": "VARCHAR(11)",
+        "original_emptied": "BOOLEAN",
+    },
+}
+
+
+def _add_columns(con: sqlite3.Connection) -> None:
+    for table, cols in ADDITIONS.items():
+        existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        if not existing:
+            print(f"{table}: no such table yet — skipped (created fresh on startup)")
+            continue
+        for name, decl in cols.items():
+            if name in existing:
+                continue
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+            print(f"{table}: added {name} {decl}")
+
+
+def _move_temperature_out_of_events(con: sqlite3.Connection) -> None:
+    """Temperature rounds moved from the event log into their own table."""
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "events" not in tables or "temperature_readings" not in tables:
+        return
+    rows = con.execute(
+        """SELECT id, container_number, at, created_at, voided_at, time_slot,
+                  set_point_c, supply_temp_c, return_temp_c, temperature_remark, comments
+           FROM events WHERE kind = 'temperature'"""
+    ).fetchall()
+    if not rows:
+        return
+    con.executemany(
+        """INSERT INTO temperature_readings
+             (container_number, at, created_at, voided_at, time_slot,
+              set_point_c, supply_temp_c, return_temp_c, temperature_remark, comments)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [r[1:] for r in rows],
+    )
+    con.execute("DELETE FROM events WHERE kind = 'temperature'")
+    print(f"events: moved {len(rows)} temperature row(s) into temperature_readings")
+
+
+def main(db: str = "yard.db") -> None:
+    con = sqlite3.connect(db)
+    try:
+        _add_columns(con)
+        _move_temperature_out_of_events(con)
+        con.commit()
+    finally:
+        con.close()
+    print("done")
+
+
+if __name__ == "__main__":
+    main(*sys.argv[1:])

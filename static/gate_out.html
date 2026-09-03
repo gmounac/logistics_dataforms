@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gate out · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Gate out</h1>
+    <nav><a href="/">Yard</a> <a href="/gate-in">Gate in</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time out</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Leaving</legend>
+      <div class="row">
+        <div class="field"><label for="destination" class="req">Destination</label><select id="destination" required></select><div class="err" id="destinationErr"></div></div>
+        <div class="field"><label for="cargoStatus" class="req">Cargo</label><select id="cargoStatus" required></select><div class="err" id="cargoStatusErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Hauler</legend>
+      <div class="row">
+        <div class="field"><label for="hauler" class="req">Company</label><select id="hauler" required></select><div class="err" id="haulerErr"></div></div>
+        <div class="field"><label for="plate">License plate</label><input id="plate" placeholder="S34872" autocapitalize="characters" autocomplete="off" /><div class="err" id="plateErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="Seal numbers, damage, anything the receiver should know"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record gate out</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Only containers currently in the yard are listed") + Yard.unlistedHTML(false);
+  const pick = Yard.picker({
+    unlisted: { kind: "gate_out" },
+    onSelect: (st) => {
+      if (st.cargo_status) $("cargoStatus").value = st.cargo_status;
+      if (st.is_plugged) $("onfile").querySelector(".warn").textContent = "Still plugged in — plug out before gating out.";
+      $("destination").focus();
+    },
+  });
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required", destination: "Choose a destination",
+                              cargoStatus: "Choose a cargo status", hauler: "Choose a hauler" });
+    if (!pick.require()) ok = false;
+    const plate = $("plate").value.trim().toUpperCase();
+    if (plate && !/^S\d+$/.test(plate)) { setError("plate", "S followed by digits, no spaces"); ok = false; }
+    if (!ok) return null;
+    return pick.wrap({ at: atISO(), comments: $("comments").value.trim(), container_number: pick.number(),
+             destination: $("destination").value, cargo_status: $("cargoStatus").value,
+             hauler: $("hauler").value, hauler_plate: plate || null });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/gate-out", (d) => {
+    receipt(d.container.number, [["Left", Yard.fmt(d.last_event.at)], ["To", d.last_event.destination], ["Cargo", d.cargo_status]]);
+    resetKeepingTime("form", () => { pick.reset(); $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("destination"), o.destinations); fill($("cargoStatus"), o.cargo_statuses); fill($("hauler"), o.haulers);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

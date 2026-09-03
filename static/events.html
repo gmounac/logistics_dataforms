@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Records · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+  <style>
+    .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+    .filters .wide { grid-column: 1 / -1; }
+    @media (min-width: 720px) { .filters { grid-template-columns: 1.4fr 1fr 1fr 1fr; } .filters .wide { grid-column: auto; } }
+    .results-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 14px 0 8px; flex-wrap: wrap; }
+    .results-bar .n { color: var(--ink-soft); }
+    .results-bar .btns { display: flex; gap: 8px; }
+    table { font-size: 14px; }
+    th, td { white-space: nowrap; }
+    td.wrap { white-space: normal; min-width: 180px; }
+    tbody tr:hover { background: #fdf0e4; }
+    .copied { color: var(--ok); font-size: 14px; }
+    .manage-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 14px; }
+    .manage-toggle input { width: 18px; height: 18px; min-height: 0; }
+    th.actions, td.actions { white-space: nowrap; text-align: right; }
+    td.actions button { margin-left: 6px; }
+    .row-btn { min-height: 34px; padding: 0 12px; font-size: 13px; }
+    .row-btn.danger { color: var(--bad); border-color: var(--bad); }
+    tr.voided { opacity: .55; }
+    tr.voided td:not(.actions) { text-decoration: line-through; }
+    .voided-tag { font-size: 12px; color: var(--ink-soft); text-decoration: none; display: inline-block; margin-left: 6px; }
+    tr.has-note { cursor: pointer; }
+    .note-mark { margin-left: 6px; font-size: 12px; }
+    tr.note-row td { white-space: normal; background: #fdf0e4; color: var(--ink); font-size: 13px; padding: 8px 12px 12px; }
+
+    dialog#editDialog { border: 1px solid var(--line); border-radius: var(--radius); padding: 0; max-width: 480px; width: 92vw; }
+    dialog#editDialog::backdrop { background: rgba(27,36,48,.45); }
+    dialog#editDialog .body { padding: 20px; }
+    dialog#editDialog h2 { font-size: 18px; margin: 0 0 4px; }
+    dialog#editDialog .sub { color: var(--ink-soft); font-size: 14px; margin-bottom: 16px; }
+    dialog#editDialog .actions-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+  </style>
+</head>
+<body>
+<main class="wide">
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Records</h1>
+    <nav><a href="/">Yard</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+
+  <fieldset>
+    <legend>Show</legend>
+    <div class="filters">
+      <div class="field"><label for="kind">Kind</label><select id="kind"></select></div>
+      <div class="field"><label for="from">From</label><input type="date" id="from" /></div>
+      <div class="field"><label for="to">To</label><input type="date" id="to" /></div>
+      <div class="field wide"><label for="q">Container</label><input id="q" placeholder="Any part of the number" autocomplete="off" autocapitalize="characters" /></div>
+    </div>
+  </fieldset>
+
+  <div class="results-bar">
+    <span class="n" id="count">–</span>
+    <div class="btns">
+      <label class="manage-toggle"><input type="checkbox" id="manage" /> Enable editing</label>
+      <button type="button" class="ghost" id="copy">Copy table</button>
+      <button type="button" class="ghost" id="csv">Download CSV</button>
+    </div>
+  </div>
+  <div class="scroll"><table><thead id="head"></thead><tbody id="rows"></tbody></table></div>
+</main>
+
+<dialog id="editDialog">
+  <form method="dialog" class="body" id="editForm">
+    <h2 id="editTitle">Edit record</h2>
+    <div class="sub" id="editSub"></div>
+    <div id="editFields"></div>
+    <div class="err" id="editErr"></div>
+    <div class="actions-row">
+      <button type="button" class="ghost" id="editCancel">Cancel</button>
+      <button type="submit" class="primary" id="editSave" style="width:auto;padding:0 20px">Save changes</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  const { $, fill } = Yard;
+  const dt = (iso) => iso ? new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "";
+  const d = (iso) => iso ? new Date(iso).toLocaleDateString() : "";
+  const n = (v) => (v === null || v === undefined) ? "" : v;
+
+  // Column sets per kind: [header, render(row)]
+  const common = [["When", (e) => dt(e.at)], ["Container", (e) => e.container_number]];
+  // Comments and Entered are kept off the on-screen table (too wide on a phone);
+  // they ride along in Copy table / Download CSV via EXPORT_EXTRA below, and
+  // Comments is still one tap away as an expandable row and in the Edit dialog.
+  const tail = [];
+  const EXPORT_EXTRA = [["Comments", (e) => n(e.comments)], ["Entered", (e) => dt(e.created_at)]];
+  const SEL = (o) => o; // marker: value is an OPTIONS key, resolved at render time
+
+  const KINDS = {
+    gate_in:     { label: "Gate in",     path: "/api/events?kind=gate_in", idKey: "id", eventKind: true,
+                   cols: [...common, ["Cargo", (e) => n(e.cargo_status)], ["PTI", (e) => n(e.pti_status)], ["Hauler", (e) => [e.hauler, e.hauler_plate].filter(Boolean).join(" ")], ...tail],
+                   editFields: [
+                     { key: "cargo_status", label: "Cargo", type: "select", options: "cargo_statuses" },
+                     { key: "pti_status", label: "PTI status", type: "select", options: "pti_statuses" },
+                     { key: "hauler", label: "Hauler", type: "select", options: "haulers" },
+                     { key: "hauler_plate", label: "License plate", type: "text" },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ] },
+    gate_out:    { label: "Gate out",    path: "/api/events?kind=gate_out", idKey: "id", eventKind: true,
+                   cols: [...common, ["Destination", (e) => n(e.destination)], ["Cargo", (e) => n(e.cargo_status)], ["Hauler", (e) => [e.hauler, e.hauler_plate].filter(Boolean).join(" ")], ...tail],
+                   editFields: [
+                     { key: "destination", label: "Destination", type: "select", options: "destinations" },
+                     { key: "cargo_status", label: "Cargo", type: "select", options: "cargo_statuses" },
+                     { key: "hauler", label: "Hauler", type: "select", options: "haulers" },
+                     { key: "hauler_plate", label: "License plate", type: "text" },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ] },
+    plug_in:     { label: "Plug in (storage + PTI)", path: "/api/events?kind=plug_in", idKey: "id", eventKind: true,
+                   cols: [...common, ["Reason", (e) => n(e.purpose)], ["Generator", (e) => n(e.generator)], ["Set point", (e) => n(e.set_point_c)], ["Supply", (e) => n(e.supply_temp_c)], ["Return", (e) => n(e.return_temp_c)], ["Seal", (e) => n(e.seal_number)], ["Tare kg", (e) => n(e.tare_weight_kg)], ["Cargo", (e) => n(e.cargo_status)], ...tail],
+                   editFields: [
+                     { key: "generator", label: "Generator", type: "select", options: "generators", optional: true },
+                     { key: "set_point_c", label: "Set point °C", type: "number" },
+                     { key: "supply_temp_c", label: "Supply °C", type: "number" },
+                     { key: "return_temp_c", label: "Return °C", type: "number" },
+                     { key: "seal_number", label: "Seal number", type: "text" },
+                     { key: "tare_weight_kg", label: "Tare weight kg", type: "number" },
+                     { key: "cargo_status", label: "Cargo", type: "select", options: "cargo_statuses", optional: true },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ] },
+    plug_out:    { label: "Plug out / PTI unplug", path: "/api/events?kind=plug_out", idKey: "id", eventKind: true,
+                   cols: [...common, ["Sticker", (e) => n(e.sticker)], ["Supply", (e) => n(e.supply_temp_c)], ["Return", (e) => n(e.return_temp_c)], ...tail],
+                   editFields: [
+                     { key: "sticker", label: "Sticker", type: "select", options: "stickers", optional: true },
+                     { key: "supply_temp_c", label: "Supply °C", type: "number" },
+                     { key: "return_temp_c", label: "Return °C", type: "number" },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ] },
+    cleaning:    { label: "Cleaning",    path: "/api/events?kind=cleaning", idKey: "id", eventKind: true,
+                   cols: [...common, ["Result", (e) => n(e.cleaning_result)], ["Cross stuffed", (e) => e.cross_stuffed ? "Yes" : ""], ...tail],
+                   editFields: [
+                     { key: "cleaning_result", label: "Result", type: "select", options: "cleaning_results" },
+                     { key: "cross_stuffed", label: "Cross stuffed", type: "checkbox" },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ] },
+    temperature: { label: "Temperature rounds", path: "/api/temperature?limit=500", local: true, idKey: "id",
+                   cols: [["Date", (e) => d(e.at)], ["Round", (e) => n(e.time_slot)], ["Container", (e) => e.container_number], ["Set point", (e) => n(e.set_point_c)], ["Supply", (e) => n(e.supply_temp_c)], ["Return", (e) => n(e.return_temp_c)], ["Remark", (e) => n(e.temperature_remark)]],
+                   exportExtra: EXPORT_EXTRA,
+                   editFields: [
+                     { key: "time_slot", label: "Round", type: "select", options: "time_slots" },
+                     { key: "set_point_c", label: "Set point °C", type: "number" },
+                     { key: "supply_temp_c", label: "Supply °C", type: "number" },
+                     { key: "return_temp_c", label: "Return °C", type: "number" },
+                     { key: "temperature_remark", label: "Remark", type: "select", options: "temperature_remarks" },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ],
+                   editPath: (row) => `/api/temperature/${row.id}`,
+                   deletePath: (row) => `/api/temperature/${row.id}` },
+    cross_stuff: { label: "Cross stuffing", path: "/api/events?kind=cross_stuff", idKey: "id", eventKind: true,
+                   cols: [["Start", (e) => dt(e.at)], ["End", (e) => dt(e.ended_at)], ["Container", (e) => e.container_number],
+                          ["To", (e) => n(e.cross_stuff_target)], ["New container", (e) => n(e.new_container_number)],
+                          ["Original emptied", (e) => e.original_emptied ? "Yes" : ""], ...tail],
+                   editFields: [
+                     { key: "cross_stuff_target", label: "Transferred to", type: "select", options: "cross_stuff_targets" },
+                     { key: "new_container_number", label: "New container", type: "text" },
+                     { key: "original_emptied", label: "Original emptied after service", type: "checkbox" },
+                     { key: "comments", label: "Comments", type: "textarea" },
+                   ] },
+    shifting:    { label: "Shifting",    path: "/api/shifting?limit=500", local: true, idKey: "id",
+                   cols: [["When", (j) => dt(j.at)], ["Customer", (j) => j.customer], ["Containers", (j) => j.container_numbers.join(", ")], ["Job", (j) => j.remarks], ["Entered", (j) => dt(j.created_at)]],
+                   editFields: [
+                     { key: "customer", label: "Customer", type: "select", options: "customers" },
+                     { key: "container_numbers", label: "Container numbers", type: "text", hint: "Comma separated" },
+                     { key: "remarks", label: "Job", type: "textarea" },
+                   ],
+                   editPath: (row) => `/api/shifting/${row.id}`,
+                   deletePath: (row) => `/api/shifting/${row.id}`,
+                   buildEditBody: (row, values) => ({
+                     at: row.at, customer: values.customer, remarks: values.remarks,
+                     container_numbers: values.container_numbers.split(",").map((x) => x.trim()).filter(Boolean),
+                   }) },
+    unmatched:   { label: "Unmatched records", path: "/api/unmatched?include_resolved=true", local: true, idKey: "id",
+                   cols: [["When", (u) => dt(u.at)], ["Container", (u) => u.container_number + (u.check_digit_ok ? "" : " (check digit?)")], ["Form", (u) => u.kind.replace("_", " ")], ["Details", (u) => Object.entries(u.details || {}).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join("; ")], ["Comments", (u) => n(u.comments)], ["Sorted", (u) => u.resolved_at ? dt(u.resolved_at) : "open"]],
+                   deletePath: (row) => `/api/unmatched/${row.id}`,
+                   deleteOnly: true },
+    containers:  { label: "Containers (registry)", path: "/api/containers?limit=1000", local: true, idKey: "number",
+                   cols: [["Number", (c) => c.number], ["Line", (c) => c.shipping_line], ["Type", (c) => c.container_type], ["Size", (c) => c.size], ["Reefer type", (c) => n(c.reefer_type)], ["Manufacturer", (c) => n(c.unit_manufacturer)], ["Registered", (c) => dt(c.created_at)]],
+                   editFields: [
+                     { key: "shipping_line", label: "Shipping line", type: "select", options: "shipping_lines" },
+                     { key: "container_type", label: "Type", type: "select", options: "container_types" },
+                     { key: "size", label: "Size", type: "select", options: "sizes" },
+                     { key: "reefer_type", label: "Reefer type", type: "select", options: "reefer_types", optional: true },
+                     { key: "unit_manufacturer", label: "Unit manufacturer", type: "select", options: "unit_manufacturers", optional: true },
+                   ],
+                   editPath: (row) => `/api/containers/${row.number}`,
+                   deletePath: (row) => `/api/containers/${row.number}`,
+                   buildEditBody: (row, values) => values,
+                   idDisplay: (row) => row.number },
+  };
+  const WRAP = new Set(["Comments", "Containers", "Job", "Details"]);
+
+  let ROWS = [], COLS = [], DEF = null, OPTIONS = {};
+
+  function render() {
+    const manage = $("manage").checked;
+    const showActions = manage && (DEF.editFields || DEF.deletePath);
+    $("head").innerHTML = "<tr>" + COLS.map(([h]) => `<th>${h}</th>`).join("") + (showActions ? '<th class="actions">Actions</th>' : "") + "</tr>";
+    const tb = $("rows"); tb.innerHTML = "";
+    const colspan = COLS.length + (showActions ? 1 : 0);
+    if (!ROWS.length) { tb.innerHTML = `<tr class="empty-row"><td colspan="${colspan}">Nothing recorded for this selection</td></tr>`; }
+    const noteColspan = COLS.length + (showActions ? 1 : 0);
+    for (const r of ROWS) {
+      const voided = !!r.voided_at;
+      const hasNote = !!(r.comments && String(r.comments).trim());
+      const tr = document.createElement("tr");
+      if (voided) tr.className = "voided";
+      if (hasNote) tr.classList.add("has-note");
+      for (const [h, f] of COLS) {
+        const td = document.createElement("td");
+        if (WRAP.has(h)) td.className = "wrap";
+        td.textContent = f(r);
+        if (h === "Container" || h === "Number") {
+          if (hasNote) td.insertAdjacentHTML("beforeend", ' <span class="note-mark" title="Has a comment">\u{1F4AC}</span>');
+          td.insertAdjacentHTML("beforeend", voided ? ' <span class="voided-tag">deleted</span>' : "");
+        }
+        tr.appendChild(td);
+      }
+      if (showActions) {
+        const td = document.createElement("td");
+        td.className = "actions";
+        if (!voided) {
+          if (DEF.editFields && !DEF.deleteOnly) {
+            const eb = document.createElement("button");
+            eb.type = "button"; eb.className = "ghost row-btn"; eb.textContent = "Edit";
+            eb.addEventListener("click", () => openEdit(r));
+            td.appendChild(eb);
+          }
+          if (DEF.deletePath || DEF.eventKind) {
+            const db = document.createElement("button");
+            db.type = "button"; db.className = "ghost row-btn danger"; db.textContent = "Delete";
+            db.addEventListener("click", () => doDelete(r));
+            td.appendChild(db);
+          }
+        }
+        tr.appendChild(td);
+      }
+      tb.appendChild(tr);
+
+      if (hasNote) {
+        const nr = document.createElement("tr");
+        nr.className = "note-row";
+        nr.hidden = true;
+        const ntd = document.createElement("td");
+        ntd.colSpan = noteColspan;
+        ntd.textContent = r.comments;
+        nr.appendChild(ntd);
+        tb.appendChild(nr);
+        tr.addEventListener("click", (ev) => {
+          if (ev.target.closest("button")) return;   // don't toggle when hitting Edit/Delete
+          nr.hidden = !nr.hidden;
+        });
+      }
+    }
+    $("count").textContent = `${ROWS.length} record${ROWS.length === 1 ? "" : "s"}` + (ROWS.length >= 500 ? " (showing the latest 500 — narrow the dates)" : "");
+  }
+
+  // ------------------------------------------------------------- edit dialog
+  const dlg = $("editDialog");
+  let editing = null;
+
+  function fieldValue(field) {
+    const el = $("f_" + field.key);
+    if (field.type === "checkbox") return el.checked;
+    if (field.type === "number") return el.value.trim() === "" ? null : Number(el.value);
+    if (el.value === "" && field.optional) return null;
+    return el.value;
+  }
+
+  function openEdit(row) {
+    editing = row;
+    $("editErr").textContent = "";
+    $("editTitle").textContent = `Edit ${DEF.label.toLowerCase()}`;
+    $("editSub").textContent = row.container_number || row.number || (row.container_numbers || []).join(", ") || "";
+    const box = $("editFields"); box.innerHTML = "";
+    for (const field of DEF.editFields) {
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      const raw = row[field.key];
+      if (field.type === "select") {
+        wrap.innerHTML = `<label for="f_${field.key}">${field.label}</label><select id="f_${field.key}"></select>`;
+        const sel = wrap.querySelector("select");
+        const opts = OPTIONS[field.options] || [];
+        fill(sel, opts, field.optional ? "None" : "Select");
+        sel.value = raw || "";
+      } else if (field.type === "textarea") {
+        wrap.innerHTML = `<label for="f_${field.key}">${field.label}</label><textarea id="f_${field.key}"></textarea>`;
+        wrap.querySelector("textarea").value = raw || "";
+      } else if (field.type === "checkbox") {
+        wrap.innerHTML = `<label class="check"><input type="checkbox" id="f_${field.key}" /> ${field.label}</label>`;
+        wrap.querySelector("input").checked = !!raw;
+      } else {
+        const step = field.type === "number" ? ' step="0.1"' : "";
+        wrap.innerHTML = `<label for="f_${field.key}">${field.label}</label><input id="f_${field.key}" type="${field.type}"${step} />` + (field.hint ? `<div class="hint">${field.hint}</div>` : "");
+        const input = wrap.querySelector("input");
+        input.value = field.key === "container_numbers" && Array.isArray(raw) ? raw.join(", ") : (raw ?? "");
+      }
+      box.appendChild(wrap);
+    }
+    dlg.showModal();
+  }
+
+  $("editCancel").addEventListener("click", () => dlg.close());
+  $("editForm").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const values = {};
+    for (const field of DEF.editFields) values[field.key] = fieldValue(field);
+    const body = DEF.buildEditBody ? DEF.buildEditBody(editing, values) : values;
+    const path = DEF.editPath ? DEF.editPath(editing) : `/api/events/${editing.id}`;
+    const r = await Yard.patch(path, body);
+    if (!r.ok) { $("editErr").textContent = r.message; $("editErr").classList.add("show"); return; }
+    dlg.close();
+    load();
+  });
+
+  async function doDelete(row) {
+    const label = row.container_number || row.number || (row.container_numbers || []).join(", ");
+    const noun = DEF.eventKind ? "this event" : DEF.label.toLowerCase().includes("container") ? "this container" : "this record";
+    if (!confirm(`Delete ${noun} for ${label}? This can't be undone.`)) return;
+    const path = DEF.deletePath ? DEF.deletePath(row) : `/api/events/${row.id}`;
+    const r = await Yard.del(path);
+    if (!r.ok) { Yard.alert("bad", r.message); return; }
+    load();
+  }
+
+  function dayBounds() {
+    const f = $("from").value, t = $("to").value;
+    return { from: f ? new Date(f + "T00:00").toISOString() : null, to: t ? new Date(t + "T23:59:59").toISOString() : null };
+  }
+
+  async function load() {
+    const kind = $("kind").value; DEF = KINDS[kind]; COLS = DEF.cols;
+    const { from, to } = dayBounds(); const q = $("q").value.trim().toUpperCase();
+    let url = DEF.path;
+    if (!DEF.local) {
+      const p = new URLSearchParams();
+      if (q) p.set("q", q); if (from) p.set("date_from", from); if (to) p.set("date_to", to);
+      url += "&" + p;
+    }
+    try {
+      const r = await fetch(url); if (!r.ok) throw new Error(r.statusText);
+      let rows = await r.json();
+      if (DEF.local && kind !== "containers") {
+        rows = rows.filter((x) => (!from || x.at >= from) && (!to || x.at <= to)
+          && (!q || (x.container_numbers ? x.container_numbers.some((c) => c.includes(q)) : x.container_number.includes(q))));
+      } else if (kind === "containers" && q) {
+        rows = rows.filter((c) => c.number.includes(q));
+      }
+      ROWS = rows; render();
+    } catch { Yard.alert("bad", "Could not load records. Is the server running?"); }
+  }
+
+  // exports carry the on-screen columns plus Comments/Entered, which are hidden in the table
+  function exportCols() {
+    if (DEF.eventKind) return [...COLS, ...EXPORT_EXTRA];
+    if (DEF.exportExtra) return [...COLS, ...DEF.exportExtra];
+    return COLS;
+  }
+  function tsv() {
+    const cols = exportCols();
+    return [cols.map(([h]) => h).join("\t"), ...ROWS.map((r) => cols.map(([, f]) => String(f(r)).replace(/\t|\n/g, " ")).join("\t"))].join("\n");
+  }
+  function csv() {
+    const cols = exportCols();
+    const esc = (v) => { v = String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+    return [cols.map(([h]) => esc(h)).join(","), ...ROWS.map((r) => cols.map(([, f]) => esc(f(r))).join(","))].join("\r\n");
+  }
+  // navigator.clipboard needs a secure context, which http://<lan-ip> on a phone
+  // is not; fall back to a temporary textarea + execCommand there.
+  function legacyCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  $("copy").addEventListener("click", async () => {
+    const flash = () => { $("copy").textContent = "Copied"; setTimeout(() => $("copy").textContent = "Copy table", 1500); };
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(tsv()); flash(); return; }
+      throw new Error("insecure context");
+    } catch {
+      if (legacyCopy(tsv())) flash();
+      else Yard.alert("bad", "Clipboard blocked by the browser — use Download CSV instead.");
+    }
+  });
+  $("csv").addEventListener("click", () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + csv()], { type: "text/csv" }));
+    a.download = `${$("kind").value}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  });
+
+  (async function init() {
+    OPTIONS = await Yard.options().catch(() => ({}));
+    const sel = $("kind");
+    for (const [k, v] of Object.entries(KINDS)) sel.add(new Option(v.label, k));
+    const params = new URLSearchParams(location.search);
+    sel.value = KINDS[params.get("kind")] ? params.get("kind") : "gate_in";
+    const today = new Date(); const pad = (n) => String(n).padStart(2, "0");
+    const iso = (x) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+    const monthAgo = new Date(today); monthAgo.setDate(today.getDate() - 30);
+    $("from").value = iso(monthAgo); $("to").value = iso(today);
+    ["kind", "from", "to"].forEach((id) => $(id).addEventListener("change", load));
+    $("manage").addEventListener("change", render);
+    let t; $("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(load, 250); });
+    load();
+  })();
+</script>
+</body>
+</html>

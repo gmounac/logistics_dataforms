@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plug out (storage) · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Plug out</h1>
+    <nav><a href="/">Yard</a> <a href="/plug-in">Plug in</a> <a href="/pti-unplug">PTI</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time unplugged</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Readings at plug out</legend>
+      <div class="row">
+        <div class="field"><label for="sup">Supply °C</label><input type="number" id="sup" step="0.1" /><div class="err" id="supErr"></div></div>
+        <div class="field"><label for="ret">Return °C</label><input type="number" id="ret" step="0.1" /><div class="err" id="retErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="Result of the inspection, faults found, anything for the next step"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record plug out</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Reefers plugged in for storage") + Yard.unlistedHTML(true);
+  const pick = Yard.picker({
+    filter: { plugged: true, purpose: "Storage" },
+    unlisted: { kind: "plug_out" },
+    onSelect: () => $("sup").focus(),
+  });
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required" });
+    if (!pick.require()) ok = false;
+    if (!ok) return null;
+    const num = (id) => $(id).value.trim() === "" ? null : Number($(id).value);
+    return pick.wrap({ at: atISO(), comments: $("comments").value.trim(), container_number: pick.number(),
+             supply_temp_c: num("sup"), return_temp_c: num("ret") });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/plug-out", (d) => {
+    receipt(d.container.number, [["Unplugged", Yard.fmt(d.last_event.at)], ["Cargo", d.cargo_status]]);
+    resetKeepingTime("form", () => { pick.reset(); $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    Yard.fillUnlisted(o);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

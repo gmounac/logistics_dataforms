@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plug in (storage) · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Plug in</h1>
+    <nav><a href="/">Yard</a> <a href="/plug-out">Plug out</a> <a href="/pti-plug">PTI</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time plugged</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Power</legend>
+      <div class="row">
+        <div class="field"><label for="generator">Generator</label><select id="generator"></select><div class="err" id="generatorErr"></div></div>
+        <div class="field"><label for="setPoint" class="req">Set point °C</label><input type="number" id="setPoint" step="0.5" min="-70" max="30" placeholder="-25" required /><div class="err" id="setPointErr"></div></div>
+      </div>
+      <div class="field"><label for="seal" class="req">Seal number</label><input id="seal" placeholder="L0059326 or MLSC0025985" autocapitalize="characters" autocomplete="off" /><div class="hint">A letter + 7 digits, or MLSC + 7 digits</div><div class="err" id="sealErr"></div></div>
+    </fieldset>
+    <fieldset>
+      <legend>Readings at plug in</legend>
+      <div class="row">
+        <div class="field"><label for="sup">Supply °C</label><input type="number" id="sup" step="0.1" /><div class="err" id="supErr"></div></div>
+        <div class="field"><label for="ret">Return °C</label><input type="number" id="ret" step="0.1" /><div class="err" id="retErr"></div></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="tare">Tare weight kg</label><input type="number" id="tare" min="1000" max="9999" step="1" placeholder="3500" /><div class="err" id="tareErr"></div></div>
+        <div class="field"><label for="cargoStatus">Cargo</label><select id="cargoStatus"></select><div class="hint">Leave as is if unchanged</div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="Unit condition, alarms, anything the temperature round should watch"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record plug in</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Reefers in the yard that are not plugged in") + Yard.unlistedHTML(true);
+  const pick = Yard.picker({
+    filter: { reefer: true, plugged: false },
+    unlisted: { kind: "plug_in" },
+    onSelect: (st) => {
+      const min = { "Standard": -25, "Magnum": -35, "Magnum +": -35, "S Freezer": -60 }[st.container.reefer_type];
+      $("setPoint").min = min;
+      $("setPoint").placeholder = min;
+      $("generator").focus();
+    },
+  });
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required", setPoint: "Set point is required" });
+    if (!pick.require()) ok = false;
+    const seal = $("seal").value.trim().toUpperCase();
+    if (seal && !/^(?:[A-Z]|MLSC)\d{7}$/.test(seal)) { setError("seal", "A letter + 7 digits, or MLSC + 7 digits"); ok = false; }
+    if (!seal) { setError("seal", "Seal number is required"); ok = false; }
+    const tare = $("tare").value.trim();
+    if (tare && !/^\d{4}$/.test(tare)) { setError("tare", "4 digits, in kg"); ok = false; }
+    if (!ok) return null;
+    const num = (id) => $(id).value.trim() === "" ? null : Number($(id).value);
+    return pick.wrap({ at: atISO(), comments: $("comments").value.trim(), container_number: pick.number(),
+             purpose: "Storage", generator: $("generator").value || null, set_point_c: Number($("setPoint").value),
+             supply_temp_c: num("sup"), return_temp_c: num("ret"), seal_number: seal || null,
+             tare_weight_kg: tare ? Number(tare) : null, cargo_status: $("cargoStatus").value || null });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/plug-in", (d) => {
+    const p = d.plugged_in;
+    receipt(d.container.number, [["Plugged", Yard.fmt(p.at)], ["Generator", p.generator || "none"], ["Set point", p.set_point_c + " °C"], ["Seal", p.seal_number]]);
+    resetKeepingTime("form", () => { pick.reset(); $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("generator"), o.generators, "None");
+    fill($("cargoStatus"), o.cargo_statuses.filter((s) => s !== "Empty"), "Unchanged");
+    Yard.fillUnlisted(o);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>

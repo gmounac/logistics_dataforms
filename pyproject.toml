@@ -1,0 +1,22 @@
+[project]
+name = "logistics-dataforms"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "duckdb>=1.5.5",
+    "fastapi[standard]>=0.141.1",
+    "polars[pyarrow]>=1.44.1",
+    "scan-google-sheet>=0.3.0",
+    "sqlalchemy>=2.0.52",
+    "sqlglot>=30.18.0",
+]
+
+[dependency-groups]
+dev = [
+    "altair>=6.2.2",
+    "marimo>=0.24.0",
+    "ruff>=0.16.5",
+    "ty>=0.0.78",
+]

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cleaning · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Cleaning</h1>
+    <nav><a href="/">Yard</a></nav>
+  </header>
+  <div id="alert" class="alert" role="alert"></div>
+  <section id="receipt" class="receipt" aria-live="polite"><div class="num" id="rNumber"></div><dl></dl></section>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div class="field"><label for="date" class="req">Date</label><input type="date" id="date" required /><div class="err" id="dateErr"></div></div>
+        <div class="field"><label for="time" class="req">Time</label><input type="time" id="time" required /><div class="err" id="timeErr"></div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Container</legend>
+      <div class="field">
+        <label for="containerNumber" class="req">Container number</label>
+        <div id="pickerMount"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Inspection</legend>
+      <div class="field">
+        <label for="result" class="req">Result</label>
+        <select id="result" required></select>
+        <div class="err" id="resultErr"></div>
+      </div>
+      <div class="field">
+        <label class="check"><input type="checkbox" id="crossStuffed" /> Cross stuffed</label>
+        <div class="hint">Cargo was transferred, so a container already washed this visit can be washed again</div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Notes</legend>
+      <div class="field">
+        <label for="comments" id="commentsLabel">Comments</label>
+        <textarea id="comments" placeholder="What was found, what was done"></textarea>
+        <div class="err" id="commentsErr"></div>
+      </div>
+    </fieldset>
+    <button type="submit" id="submit" class="primary">Record cleaning</button>
+  </form>
+</main>
+<script>
+  const { $, fill, setError, validateCommon, atISO, receipt, resetKeepingTime, alert } = Yard;
+  $("pickerMount").innerHTML = Yard.pickerHTML("Containers in the yard not yet cleaned this visit") + Yard.unlistedHTML(false);
+  const filter = { cleanable: true };
+  const pick = Yard.picker({ filter, unlisted: { kind: "cleaning" }, onSelect: () => $("result").focus() });
+  $("crossStuffed").addEventListener("change", () => {
+    // ticked: any container on site may be picked, including ones already cleaned
+    if ($("crossStuffed").checked) delete filter.cleanable; else filter.cleanable = true;
+    pick.reset(); $("containerNumber").value = "";
+  });
+  $("result").addEventListener("change", () => $("commentsLabel").classList.toggle("req", $("result").value === "Other" || $("comments").required));
+
+  function build() {
+    let ok = validateCommon({ date: "Date is required", time: "Time is required", result: "Choose a result" });
+    if (!pick.require()) ok = false;
+    if ($("result").value === "Other" && !$("comments").value.trim()) { setError("comments", "Say what happened when the result is Other"); ok = false; }
+    if (!ok) return null;
+    return pick.wrap({ at: atISO(), comments: $("comments").value.trim(), container_number: pick.number(),
+                       result: $("result").value, cross_stuffed: $("crossStuffed").checked });
+  }
+
+  Yard.onSubmit("form", "submit", build, "/api/events/cleaning", (d) => {
+    receipt(d.container.number, [["Cleaned", Yard.fmt(d.last_event.at)], ["Result", d.last_event.cleaning_result], ["Cross stuffed", d.last_event.cross_stuffed ? "Yes" : "No"]]);
+    resetKeepingTime("form", () => { pick.reset(); filter.cleanable = true; $("containerNumber").focus(); });
+  });
+
+  (async () => {
+    Yard.initDateTime();
+    const o = await Yard.options().catch(() => null);
+    if (!o) return alert("bad", "Could not load form options. Is the server running?");
+    fill($("result"), o.cleaning_results);
+    $("containerNumber").focus();
+  })();
+</script>
+</body>
+</html>
