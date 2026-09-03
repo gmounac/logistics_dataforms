@@ -17,6 +17,27 @@ dependencies = [
 dev = [
     "altair>=6.2.2",
     "marimo>=0.24.0",
+    "pytest>=9.1.1",
     "ruff>=0.16.5",
     "ty>=0.0.78",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient`:Warning",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+
+[tool.ruff]
+# marimo notebooks have their own structure (per-cell `return (x,)`, names shared
+# across cells) that trips generic lints; they are not hand-authored modules.
+extend-exclude = ["entry.py", "dashboard.py"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy requires __mapper_args__ to be a plain dict on the class body.
+"src/models.py" = ["RUF012"]
+# test builders use dict(...) for keyword-argument readability; asserts are the point.
+"tests/*" = ["S101", "C408"]

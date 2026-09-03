@@ -9,6 +9,7 @@ All writes go through YardService so the invariants live in one place:
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import ClassVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -483,7 +484,7 @@ class YardService:
             stmt = stmt.where(TemperatureReading.at <= date_to)
         return list(self.s.scalars(stmt))
 
-    TEMPERATURE_EDIT_FIELDS = {
+    TEMPERATURE_EDIT_FIELDS: ClassVar[set[str]] = {
         "time_slot", "set_point_c", "supply_temp_c", "return_temp_c",
         "temperature_remark", "comments",
     }
@@ -661,7 +662,7 @@ class YardService:
     #     them is really "this was a different event", which is a delete +
     #     re-entry, not a correction.
 
-    EDITABLE_EVENT_FIELDS = {
+    EDITABLE_EVENT_FIELDS: ClassVar[set[str]] = {
         "comments", "hauler", "hauler_plate", "cargo_status", "pti_status", "destination",
         "purpose", "generator", "set_point_c", "supply_temp_c", "return_temp_c",
         "seal_number", "tare_weight_kg", "sticker", "cleaning_result", "cross_stuffed",

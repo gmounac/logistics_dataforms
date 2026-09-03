@@ -9,19 +9,19 @@ services.YardService.state().
 import re
 from datetime import datetime
 
-from sqlalchemy import Enum as SAEnum
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from src.db import Base, UTCDateTime, utcnow
 from src.enums import (
     CleaningResult,
     ContainerReeferType,
-    CrossStuffTarget,
-    Customer,
     ContainerSize,
     ContainerStatus,
     ContainerType,
+    CrossStuffTarget,
+    Customer,
     Destination,
     EventKind,
     Generator,
@@ -94,7 +94,7 @@ class Container(Base):
     unit_manufacturer: Mapped[UnitManufacturer | None] = mapped_column(_enum(UnitManufacturer))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
-    events: Mapped[list["Event"]] = relationship(
+    events: Mapped[list[Event]] = relationship(
         back_populates="container", order_by="Event.at", cascade="all, delete-orphan"
     )
 

@@ -6,7 +6,8 @@ Gate-in:   http://127.0.0.1:8000/gate-in
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -14,7 +15,6 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
 
 from src import enums
 from src.db import init_db, make_engine, make_session_factory
@@ -50,12 +50,14 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 engine = make_engine(DATABASE_URL)
 SessionLocal = make_session_factory(engine)
 
-app = FastAPI(title="Container Yard", version="0.1.0")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db(engine)
+    yield
+
+
+app = FastAPI(title="Container Yard", version="0.1.0", lifespan=lifespan)
 
 
 def get_yard() -> Iterator[YardService]:

@@ -15,3 +15,7 @@ __marimo__/
 # local scratch / working files
 scratch_*
 *.log
+
+# SQLite (WAL sidecars appear while the app is running)
+*.db-wal
+*.db-shm

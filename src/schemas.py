@@ -5,10 +5,17 @@ client (the HTML form, a script, another app) gets the same validation.
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from src.enums import (
     CleaningResult,
@@ -56,13 +63,13 @@ class _EventRequest(BaseModel):
     def _aware_and_not_future(cls, v: datetime) -> datetime:
         if v.tzinfo is None:
             raise ValueError("at must include a timezone offset")
-        if v > datetime.now(timezone.utc) + timedelta(minutes=5):
+        if v > datetime.now(UTC) + timedelta(minutes=5):
             raise ValueError("at cannot be in the future")
         return v
 
     @model_validator(mode="after")
     def _comments_for_backdated_entries(self):
-        if datetime.now(timezone.utc) - self.at > COMMENTS_REQUIRED_AFTER and not self.comments.strip():
+        if datetime.now(UTC) - self.at > COMMENTS_REQUIRED_AFTER and not self.comments.strip():
             raise ValueError("comments are required for entries older than 3 days")
         return self
 
@@ -253,7 +260,7 @@ class TemperatureRequest(_EventRequest):
         # "in the future" by the clock. Allow the rest of the day.
         if v.tzinfo is None:
             raise ValueError("at must include a timezone offset")
-        if v > datetime.now(timezone.utc) + timedelta(hours=24):
+        if v > datetime.now(UTC) + timedelta(hours=24):
             raise ValueError("at cannot be in the future")
         return v
 
@@ -309,7 +316,7 @@ class CrossStuffRequest(_EventRequest):
     def _end_aware_not_future(cls, v: datetime) -> datetime:
         if v.tzinfo is None:
             raise ValueError("ended_at must include a timezone offset")
-        if v > datetime.now(timezone.utc) + timedelta(minutes=5):
+        if v > datetime.now(UTC) + timedelta(minutes=5):
             raise ValueError("ended_at cannot be in the future")
         return v
 
