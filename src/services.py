@@ -38,6 +38,8 @@ from src.models import (
     GateOut,
     PlugIn,
     PlugOut,
+    PtiPlugIn,
+    PtiPlugOut,
     ShiftingJob,
     TemperatureReading,
     UnmatchedRecord,
@@ -366,8 +368,9 @@ class YardService:
             )
         if self.state(c.number).is_plugged:
             raise YardError(f"{c.number} is already plugged in")
+        plug_cls = PtiPlugIn if purpose is PlugPurpose.PTI else PlugIn
         return self._append(
-            PlugIn(
+            plug_cls(
                 container_number=c.number, at=at, purpose=purpose, generator=generator,
                 set_point_c=set_point_c, supply_temp_c=supply_temp_c,
                 return_temp_c=return_temp_c, seal_number=seal_number,
@@ -390,11 +393,14 @@ class YardService:
         st = self.state(c.number)
         if not st.is_plugged:
             raise YardError(f"{c.number} is not plugged in")
-        if st.plugged_in.purpose is PlugPurpose.PTI and sticker is None:
+        closing_pti = st.plugged_in.purpose is PlugPurpose.PTI
+        if closing_pti and sticker is None:
             raise YardError("a sticker is required when plugging out from a PTI")
+        plug_out_cls = PtiPlugOut if closing_pti else PlugOut
         return self._append(
-            PlugOut(
+            plug_out_cls(
                 container_number=c.number, at=at, plug_in_id=st.plugged_in.id,
+                purpose=st.plugged_in.purpose,
                 supply_temp_c=supply_temp_c, return_temp_c=return_temp_c,
                 sticker=sticker, comments=comments,
             ),

@@ -134,6 +134,28 @@ def test_events_listing_and_kind_filter(client):
     assert len(only_clean) == 1
 
 
+def test_pti_plug_endpoints_record_pti_kinds(client):
+    _gate_in(client)
+    pin = client.post(
+        "/api/events/plug-in",
+        json=dict(
+            at=ago(hours=2), container_number=CONT_A, purpose="PTI",
+            generator="K7", set_point_c=-18,
+        ),
+    )
+    assert pin.status_code == 201, pin.text
+    pout = client.post(
+        "/api/events/plug-out",
+        json=dict(at=ago(hours=1), container_number=CONT_A, sticker="PASS"),
+    )
+    assert pout.status_code == 201, pout.text
+
+    kinds = {e["kind"] for e in client.get("/api/events").json()}
+    assert kinds == {"gate_in", "pti_plug_in", "pti_plug_out"}
+    assert len(client.get("/api/events", params={"kind": "pti_plug_in"}).json()) == 1
+    assert client.get("/api/events", params={"kind": "plug_in"}).json() == []
+
+
 def test_backdated_event_without_comment_is_422(client):
     r = _gate_in(client, at=ago(days=5))
     assert r.status_code == 422

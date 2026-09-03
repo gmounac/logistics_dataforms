@@ -9,6 +9,7 @@ from src.enums import (
     ContainerStatus,
     CrossStuffTarget,
     Destination,
+    EventKind,
     Generator,
     Hauler,
     PlugPurpose,
@@ -177,6 +178,45 @@ def test_pti_plug_out_sets_pti_status_from_sticker(yard):
     yard.plug_out(CONT_A, at=NOW - timedelta(hours=5), sticker=Sticker.PASS)
     assert yard.state(CONT_A).pti_status is PTIStatus.PTI
     assert not yard.state(CONT_A).is_plugged
+
+
+def test_pti_plugs_get_their_own_event_kind(yard):
+    gate_in_reefer(yard)
+    yard.plug_in(
+        CONT_A, at=NOW - timedelta(hours=10), purpose=PlugPurpose.PTI,
+        generator=Generator.K7, set_point_c=-18,
+    )
+    yard.plug_out(CONT_A, at=NOW - timedelta(hours=5), sticker=Sticker.PASS)
+    kinds = [e.kind for e in yard.history(CONT_A)]
+    assert kinds == [EventKind.GATE_IN, EventKind.PTI_PLUG_IN, EventKind.PTI_PLUG_OUT]
+    # folding still treats them as plug in / plug out
+    assert not yard.state(CONT_A).is_plugged
+
+
+def test_storage_plugs_keep_the_plain_kind(yard):
+    gate_in_reefer(yard)
+    yard.plug_in(
+        CONT_A, at=NOW - timedelta(hours=10), purpose=PlugPurpose.STORAGE,
+        set_point_c=-18, seal_number="L0059326", cargo_status=ContainerStatus.FULL,
+    )
+    yard.plug_out(CONT_A, at=NOW - timedelta(hours=5))
+    kinds = [e.kind for e in yard.history(CONT_A)]
+    assert kinds == [EventKind.GATE_IN, EventKind.PLUG_IN, EventKind.PLUG_OUT]
+
+
+def test_pti_kind_filter_excludes_storage_plugs(yard):
+    gate_in_reefer(yard, number=CONT_A)
+    yard.plug_in(
+        CONT_A, at=NOW - timedelta(hours=10), purpose=PlugPurpose.PTI,
+        generator=Generator.K7, set_point_c=-18,
+    )
+    yard.plug_out(CONT_A, at=NOW - timedelta(hours=9), sticker=Sticker.PASS)
+    yard.plug_in(
+        CONT_A, at=NOW - timedelta(hours=8), purpose=PlugPurpose.STORAGE,
+        set_point_c=-18, seal_number="L0059326", cargo_status=ContainerStatus.FULL,
+    )
+    assert len(yard.events(kind=EventKind.PTI_PLUG_IN)) == 1
+    assert len(yard.events(kind=EventKind.PLUG_IN)) == 1
 
 
 def test_gate_out_blocked_while_plugged_in(yard):

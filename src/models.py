@@ -197,12 +197,26 @@ class PlugIn(Event):
     __mapper_args__ = {"polymorphic_identity": EventKind.PLUG_IN}
 
 
+class PtiPlugIn(PlugIn):
+    """A plug-in for a pre-trip inspection. Same shape as PlugIn, distinct kind
+    so PTIs can be counted apart from storage plugs; `case PlugIn()` in
+    services.fold() still matches it."""
+
+    __mapper_args__ = {"polymorphic_identity": EventKind.PTI_PLUG_IN}
+
+
 class PlugOut(Event):
     __mapper_args__ = {"polymorphic_identity": EventKind.PLUG_OUT}
 
     @property
     def resulting_pti_status(self) -> PTIStatus | None:
         return self.sticker.pti_status if self.sticker else None
+
+
+class PtiPlugOut(PlugOut):
+    """The unplug that closes a PTI (carries the sticker)."""
+
+    __mapper_args__ = {"polymorphic_identity": EventKind.PTI_PLUG_OUT}
 
 
 class Cleaning(Event):

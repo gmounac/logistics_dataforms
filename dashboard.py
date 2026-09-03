@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.24.0"
-app = marimo.App(width="medium")
+app = marimo.App(width="full")
 
 with app.setup:
     import datetime as dt
@@ -16,8 +16,10 @@ with app.setup:
     KIND_LABEL = {
         "gate_in": "Gate in",
         "gate_out": "Gate out",
-        "plug_in": "Plug in",
-        "plug_out": "Plug out",
+        "plug_in": "Storage plug in",
+        "plug_out": "Storage plug out",
+        "pti_plug_in": "PTI plug in",
+        "pti_plug_out": "PTI plug out",
         "cleaning": "Cleaning",
         "cross_stuff": "Cross stuffing",
         "temperature": "Temperature round",
@@ -44,6 +46,10 @@ def _():
     def _read(sql: str) -> pl.DataFrame:
         with _engine.connect() as con:
             return pl.read_database(sql, con)
+
+
+    # id, kind, container_number, at, comments
+
 
     _events = _read("SELECT id, kind, container_number, at, comments FROM events WHERE voided_at IS NULL")
     _temps = _read(
@@ -81,7 +87,7 @@ def _():
         f"Loaded **{events.height}** events and **{temps.height}** temperature readings "
         f"across **{containers.height}** registered containers."
     )
-    return activity, temps
+    return activity, events, temps
 
 
 @app.cell
@@ -127,7 +133,8 @@ def period_report(activity: pl.DataFrame, kind: str, anchor: dt.date, temps: pl.
             mo.stat(c("gate_in"), label="Gate ins", bordered=True),
             mo.stat(c("gate_out"), label="Gate outs", bordered=True),
             mo.stat(c("gate_in") - c("gate_out"), label="Net in yard", bordered=True),
-            mo.stat(c("plug_in"), label="Plug ins", bordered=True),
+            mo.stat(c("plug_in"), label="Storage plugs", bordered=True),
+            mo.stat(c("pti_plug_in"), label="PTI plugs", bordered=True),
             mo.stat(c("cleaning"), label="Cleanings", bordered=True),
             mo.stat(c("cross_stuff"), label="Cross stuffs", bordered=True),
             mo.stat(c("temperature"), label="Temp rounds", bordered=True),
@@ -190,14 +197,105 @@ def period_report(activity: pl.DataFrame, kind: str, anchor: dt.date, temps: pl.
 
 
 @app.cell
-def _(activity, day_anchor, month_anchor, temps, week_anchor):
+def _():
+    container_selection = mo.ui.text(label="Search for container:",max_length=11)
+    return (container_selection,)
+
+
+@app.cell
+def _(activity):
+    all_data = activity.sort("at", descending=True).select(
+        (pl.col("at") + pl.duration(hours=4)).alias("When"),
+        pl.col("activity").alias("Activity"),
+        pl.col("container_number").alias("Container"),
+    )
+
+
+    result = all_data
+
+    return (result,)
+
+
+@app.cell(hide_code=True)
+def _(engine, events):
+    _df = mo.sql(
+        f"""
+        FROM events
+        WHERE kind IN ('gate_in','plug_in') 
+        """,
+        engine=engine
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(container_selection, engine):
+    _df = mo.sql(
+        f"""
+        WITH ev AS (SELECT
+            kind,
+            container_number,
+            "at"::DATETIME  + INTERVAL 4 HOUR AS datetime,
+            "comments",
+            "cargo_status",
+            "pti_status",
+            "sticker",
+            "cleaning_result"
+    
+        FROM
+            main.events
+        WHERE
+            container_number = '{container_selection.value}'),cnt AS (FROM main.containers)
+
+            SELECT 
+            	e.kind,
+            	e.container_number,
+            	e.datetime,
+            c.shipping_line,
+            e.cargo_status AS entry_status,
+            e.pti_status,
+            e.sticker,
+            e.cleaning_result,
+            e.comments
+        FROM ev e LEFT JOIN cnt c ON c.number = e.container_number
+        """,
+        engine=engine
+    )
+    return
+
+
+@app.cell
+def _():
+    import duckdb
+
+    DATABASE_URL = "yard.db"
+    engine = duckdb.connect(DATABASE_URL, read_only=False)
+    return (engine,)
+
+
+@app.cell
+def _(
+    activity,
+    container_selection,
+    day_anchor,
+    month_anchor,
+    result,
+    temps,
+    week_anchor,
+):
     mo.ui.tabs(
         {
             "Daily": mo.vstack([day_anchor, period_report(activity, "day", day_anchor.value, temps)]),
             "Weekly": mo.vstack([week_anchor, period_report(activity, "week", week_anchor.value, temps)]),
             "Monthly": mo.vstack([month_anchor, period_report(activity, "month", month_anchor.value, temps)]),
+            "All":mo.vstack([container_selection,result])
         }
     )
+    return
+
+
+@app.cell
+def _():
     return
 
 

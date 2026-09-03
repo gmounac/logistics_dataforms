@@ -38,10 +38,34 @@ def _add_columns(con: sqlite3.Connection) -> None:
             print(f"{table}: added {name} {decl}")
 
 
+def _split_pti_plug_kinds(con: sqlite3.Connection) -> None:
+    """PTI plugs used to share `plug_in`/`plug_out` with storage plugs, telling
+    them apart only by `purpose`. They now have their own EventKind so they can
+    be counted separately. Reclassify existing rows; idempotent.
+    """
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "events" not in tables:
+        return
+    ins = con.execute(
+        "UPDATE events SET kind = 'pti_plug_in' WHERE kind = 'plug_in' AND purpose = 'PTI'"
+    ).rowcount
+    # a PTI unplug is a plug_out that carries a sticker (storage unplugs never do)
+    outs = con.execute(
+        "UPDATE events SET kind = 'pti_plug_out' "
+        "WHERE kind = 'plug_out' AND (purpose = 'PTI' OR sticker IS NOT NULL)"
+    ).rowcount
+    if ins or outs:
+        print(f"events: reclassified {ins} plug-in and {outs} plug-out row(s) as PTI")
+
+
 def _move_temperature_out_of_events(con: sqlite3.Connection) -> None:
     """Temperature rounds moved from the event log into their own table."""
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "events" not in tables or "temperature_readings" not in tables:
+        return
+    # A DB created after the temperature-table split has no time_slot column on
+    # events, so there is nothing to move.
+    if "time_slot" not in {row[1] for row in con.execute("PRAGMA table_info(events)")}:
         return
     rows = con.execute(
         """SELECT id, container_number, at, created_at, voided_at, time_slot,
@@ -65,6 +89,7 @@ def main(db: str = "yard.db") -> None:
     con = sqlite3.connect(db)
     try:
         _add_columns(con)
+        _split_pti_plug_kinds(con)
         _move_temperature_out_of_events(con)
         con.commit()
     finally:

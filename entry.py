@@ -17,8 +17,10 @@ with app.setup:
     KIND_LABEL = {
         "gate_in": "Gate in",
         "gate_out": "Gate out",
-        "plug_in": "Plug in",
-        "plug_out": "Plug out",
+        "plug_in": "Storage plug in",
+        "plug_out": "Storage plug out",
+        "pti_plug_in": "PTI plug in",
+        "pti_plug_out": "PTI plug out",
         "cleaning": "Cleaning",
         "cross_stuff": "Cross stuffing",
         "temperature": "Temperature round",
@@ -180,7 +182,7 @@ def _(
             NULL::DOUBLE AS set_point_c, NULL::DOUBLE AS supply_temp_c, NULL::DOUBLE AS return_temp_c,
             NULL::VARCHAR AS seal_number, NULL::BIGINT AS tare_weight_kg, NULL::VARCHAR AS sticker, NULL::BIGINT AS plug_in_id,
             NULL::VARCHAR AS cleaning_result, NULL::BOOLEAN AS cross_stuffed,
-  
+
             NULL::TIMESTAMP AS ended_at, NULL::VARCHAR AS cross_stuff_target, NULL::VARCHAR AS new_container_number, NULL::BOOLEAN AS original_emptied
           FROM gatein_df
           WHERE regexp_full_match(trim("Container Number"),'{_num}') AND coalesce(try_cast("Date" AS DATE), try_strptime(CAST("Date" AS VARCHAR),'%d/%m/%Y')::DATE) IS NOT NULL
@@ -246,13 +248,13 @@ def _(
                      (coalesce(try_cast("Date" AS DATE), try_strptime(CAST("Date" AS VARCHAR),'%d/%m/%Y')::DATE) + coalesce(try_cast("Time Out" AS TIME),TIME '00:00')) - INTERVAL 4 HOUR) AS created_at,
             NULL::TIMESTAMP AS voided_at, coalesce(nullif(trim("Remarks"),''),'') AS comments,
             NULL::VARCHAR AS hauler, NULL::VARCHAR AS hauler_plate, NULL::VARCHAR AS cargo_status,
-            NULL::VARCHAR AS pti_status, NULL::VARCHAR AS destination, NULL::VARCHAR AS purpose, NULL::VARCHAR AS generator,
+            NULL::VARCHAR AS pti_status, NULL::VARCHAR AS destination, 'Storage'::VARCHAR AS purpose, NULL::VARCHAR AS generator,
             NULL::DOUBLE AS set_point_c,
             try_cast(regexp_extract("Plug Out Temperature",'SUP[:\s]*(-?\d+(\.\d+)?)',1) AS DOUBLE) AS supply_temp_c,
             try_cast(regexp_extract("Plug Out Temperature",'RET[:\s]*(-?\d+(\.\d+)?)',1) AS DOUBLE) AS return_temp_c,
             NULL::VARCHAR AS seal_number, NULL::BIGINT AS tare_weight_kg, NULL::VARCHAR AS sticker, NULL::BIGINT AS plug_in_id,
             NULL::VARCHAR AS cleaning_result, NULL::BOOLEAN AS cross_stuffed,
-    
+
             NULL::TIMESTAMP AS ended_at, NULL::VARCHAR AS cross_stuff_target, NULL::VARCHAR AS new_container_number, NULL::BOOLEAN AS original_emptied
           FROM plugout_df
           WHERE regexp_full_match(trim("Container Number"),'{_num}') AND coalesce(try_cast("Date" AS DATE), try_strptime(CAST("Date" AS VARCHAR),'%d/%m/%Y')::DATE) IS NOT NULL
@@ -260,7 +262,7 @@ def _(
         ),
         e_pti_in AS (
           SELECT
-            'plug_in' AS kind, trim("Container Number") AS container_number,
+            'pti_plug_in' AS kind, trim("Container Number") AS container_number,
             (coalesce(try_cast("Date Plugin" AS DATE), try_strptime(CAST("Date Plugin" AS VARCHAR),'%d/%m/%Y')::DATE) + coalesce(try_cast("Time Plugin" AS TIME),TIME '00:00')) - INTERVAL 4 HOUR AS "at",
             coalesce(coalesce(try_cast("Timestamp" AS TIMESTAMP), try_strptime(CAST("Timestamp" AS VARCHAR),'%d/%m/%Y %H:%M:%S')) - INTERVAL 4 HOUR,
                      (coalesce(try_cast("Date Plugin" AS DATE), try_strptime(CAST("Date Plugin" AS VARCHAR),'%d/%m/%Y')::DATE) + coalesce(try_cast("Time Plugin" AS TIME),TIME '00:00')) - INTERVAL 4 HOUR) AS created_at,
@@ -274,7 +276,7 @@ def _(
             NULL::DOUBLE AS supply_temp_c, NULL::DOUBLE AS return_temp_c,
             NULL::VARCHAR AS seal_number, NULL::BIGINT AS tare_weight_kg, NULL::VARCHAR AS sticker, NULL::BIGINT AS plug_in_id,
             NULL::VARCHAR AS cleaning_result, NULL::BOOLEAN AS cross_stuffed,
-   
+
             NULL::TIMESTAMP AS ended_at, NULL::VARCHAR AS cross_stuff_target, NULL::VARCHAR AS new_container_number, NULL::BOOLEAN AS original_emptied
           FROM pti_plugin_df
           WHERE regexp_full_match(trim("Container Number"),'{_num}') AND coalesce(try_cast("Date Plugin" AS DATE), try_strptime(CAST("Date Plugin" AS VARCHAR),'%d/%m/%Y')::DATE) IS NOT NULL
@@ -282,18 +284,18 @@ def _(
         ),
         e_pti_out AS (
           SELECT
-            'plug_out' AS kind, trim("Container Number") AS container_number,
+            'pti_plug_out' AS kind, trim("Container Number") AS container_number,
             (coalesce(try_cast("Date Unplugin" AS DATE), try_strptime(CAST("Date Unplugin" AS VARCHAR),'%d/%m/%Y')::DATE) + coalesce(try_cast("Time Unplugin" AS TIME),TIME '00:00')) - INTERVAL 4 HOUR AS "at",
             coalesce(coalesce(try_cast("Timestamp" AS TIMESTAMP), try_strptime(CAST("Timestamp" AS VARCHAR),'%d/%m/%Y %H:%M:%S')) - INTERVAL 4 HOUR,
                      (coalesce(try_cast("Date Unplugin" AS DATE), try_strptime(CAST("Date Unplugin" AS VARCHAR),'%d/%m/%Y')::DATE) + coalesce(try_cast("Time Unplugin" AS TIME),TIME '00:00')) - INTERVAL 4 HOUR) AS created_at,
             NULL::TIMESTAMP AS voided_at, ''::VARCHAR AS comments,
             NULL::VARCHAR AS hauler, NULL::VARCHAR AS hauler_plate, NULL::VARCHAR AS cargo_status,
-            NULL::VARCHAR AS pti_status, NULL::VARCHAR AS destination, NULL::VARCHAR AS purpose, NULL::VARCHAR AS generator,
+            NULL::VARCHAR AS pti_status, NULL::VARCHAR AS destination, 'PTI'::VARCHAR AS purpose, NULL::VARCHAR AS generator,
             NULL::DOUBLE AS set_point_c, NULL::DOUBLE AS supply_temp_c, NULL::DOUBLE AS return_temp_c,
             NULL::VARCHAR AS seal_number, NULL::BIGINT AS tare_weight_kg,
             CASE upper(trim("Sticker")) WHEN 'PASS' THEN 'PASS' WHEN 'RED' THEN 'RED' WHEN 'TBR' THEN 'TBR' WHEN 'NA' THEN 'NA' ELSE NULL END AS sticker,
             NULL::BIGINT AS plug_in_id, NULL::VARCHAR AS cleaning_result, NULL::BOOLEAN AS cross_stuffed,
-    
+
             NULL::TIMESTAMP AS ended_at, NULL::VARCHAR AS cross_stuff_target, NULL::VARCHAR AS new_container_number, NULL::BOOLEAN AS original_emptied
           FROM pti_plugout_df
           WHERE regexp_full_match(trim("Container Number"),'{_num}') AND coalesce(try_cast("Date Unplugin" AS DATE), try_strptime(CAST("Date Unplugin" AS VARCHAR),'%d/%m/%Y')::DATE) IS NOT NULL
@@ -319,7 +321,7 @@ def _(
               WHEN "cleaning_remarks" ILIKE '%unclean%' OR "cleaning_remarks" ILIKE '%fail%' THEN 'Unclean'
               WHEN "cleaning_remarks" ILIKE '%clean%' OR "cleaning_remarks" ILIKE '%pass%' THEN 'Clean' ELSE 'Other' END AS cleaning_result,
             FALSE::BOOLEAN AS cross_stuffed,
-   
+
             NULL::TIMESTAMP AS ended_at, NULL::VARCHAR AS cross_stuff_target, NULL::VARCHAR AS new_container_number, NULL::BOOLEAN AS original_emptied
           FROM cleaning_df
           WHERE regexp_full_match(trim("container_number"),'{_num}') AND coalesce(try_cast("date" AS DATE), try_strptime(CAST("date" AS VARCHAR),'%d/%m/%Y')::DATE) IS NOT NULL
@@ -341,7 +343,7 @@ def _(
             NULL::DOUBLE AS set_point_c, NULL::DOUBLE AS supply_temp_c, NULL::DOUBLE AS return_temp_c,
             NULL::VARCHAR AS seal_number, NULL::BIGINT AS tare_weight_kg, NULL::VARCHAR AS sticker, NULL::BIGINT AS plug_in_id,
             NULL::VARCHAR AS cleaning_result, NULL::BOOLEAN AS cross_stuffed,
-    
+
             CASE
               WHEN try_cast(end_time AS TIME) IS NULL THEN NULL
               WHEN try_cast(end_time AS TIME) < coalesce(try_cast(start_time AS TIME),TIME '00:00')
@@ -370,8 +372,8 @@ def _(
         SELECT
           (SELECT coalesce(max(id),0) FROM main.events)
             + row_number() OVER (ORDER BY "at",
-                CASE kind WHEN 'gate_in' THEN 0 WHEN 'plug_in' THEN 1 WHEN 'cleaning' THEN 2
-                          WHEN 'cross_stuff' THEN 3 WHEN 'plug_out' THEN 4 WHEN 'gate_out' THEN 5 ELSE 9 END,
+                CASE kind WHEN 'gate_in' THEN 0 WHEN 'plug_in' THEN 1 WHEN 'pti_plug_in' THEN 1 WHEN 'cleaning' THEN 2
+                          WHEN 'cross_stuff' THEN 3 WHEN 'plug_out' THEN 4 WHEN 'pti_plug_out' THEN 4 WHEN 'gate_out' THEN 5 ELSE 9 END,
                 container_number) AS id,
           kind, container_number, "at", created_at, voided_at, comments,
           hauler, hauler_plate, cargo_status, pti_status, destination,

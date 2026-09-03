@@ -250,8 +250,13 @@ def plug_out(body: PlugOutRequest, yard: Yard) -> StateOut:
 @app.post("/api/events/cleaning", response_model=StateOut, status_code=201)
 def cleaning(body: CleaningRequest, yard: Yard) -> StateOut:
     return _state_out(
-        yard.clean(body.container_number, at=body.at, result=body.result,
-                   cross_stuffed=body.cross_stuffed, comments=body.comments)
+        yard.clean(
+            body.container_number,
+            at=body.at,
+            result=body.result,
+            cross_stuffed=body.cross_stuffed,
+            comments=body.comments,
+        )
     )
 
 
@@ -346,7 +351,19 @@ def delete_shifting(job_id: int, yard: Yard) -> None:
 # Pages
 # --------------------------------------------------------------------------- #
 
-PAGES = {"gate-in", "gate-out", "plug-in", "plug-out", "pti-plug", "pti-unplug", "cleaning", "temperature", "cross-stuff", "shifting", "events"}
+PAGES = {
+    "gate-in",
+    "gate-out",
+    "plug-in",
+    "plug-out",
+    "pti-plug",
+    "pti-unplug",
+    "cleaning",
+    "temperature",
+    "cross-stuff",
+    "shifting",
+    "events",
+}
 NO_CACHE = {"Cache-Control": "no-store"}
 
 
