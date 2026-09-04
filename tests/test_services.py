@@ -342,6 +342,7 @@ def _two_on_site(yard):
 
 
 def test_cross_stuff_into_container_moves_cargo_state(yard):
+    """Cross stuffing moves cargo state from source to target container."""
     _two_on_site(yard)
     yard.cross_stuff(
         CONT_A,
@@ -351,6 +352,12 @@ def test_cross_stuff_into_container_moves_cargo_state(yard):
         new_container_number=CONT_B,
         original_emptied=True,
     )
+
+    cross = yard.history(CONT_A)[-1]
+
+    assert cross.new_container_number == CONT_B
+    assert len(yard._inbound_cross_stuff(CONT_B)) == 1
+
     assert yard.state(CONT_A).cargo_status is ContainerStatus.EMPTY
     assert yard.state(CONT_B).cargo_status is ContainerStatus.FULL
 
@@ -578,7 +585,7 @@ def test_only_latest_event_can_be_voided(yard):
     gate_in_reefer(yard)
     yard.clean(CONT_A, at=NOW - timedelta(hours=2), result=CleaningResult.CLEAN)
     hist = yard.history(CONT_A)
-    with pytest.raises(YardError, match="most recent event"):
+    with pytest.raises(YardError, match="later"):
         yard.void_event(hist[0].id)  # the gate-in
     yard.void_event(hist[-1].id)  # the cleaning — allowed
     assert len(yard.history(CONT_A)) == 1

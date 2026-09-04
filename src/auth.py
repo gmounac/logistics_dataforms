@@ -9,7 +9,7 @@ from __future__ import annotations
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from sqlalchemy.orm import Session
-from starlette.requests import HttpConnection
+from starlette.requests import HTTPConnection
 
 from src.models import User
 
@@ -40,7 +40,7 @@ def needs_rehash(password_hash: str) -> bool:
         return True
 
 
-def user_from_session(session: Session, request: HttpConnection) -> User | None:
+def user_from_session(session: Session, request: HTTPConnection) -> User | None:
     """The signed-in, still-active user for this request, or None."""
     uid = request.session.get(SESSION_KEY)
     if uid is None:

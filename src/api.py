@@ -4,7 +4,6 @@ Run with:  uvicorn src.api:app --reload
 Docs at:   http://127.0.0.1:8000/docs
 Gate-in:   http://127.0.0.1:8000/gate-in
 """
-from cmath import e
 
 import os
 import secrets
@@ -18,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.requests import HttpConnection
+from starlette.requests import HTTPConnection
 
 from src import auth, enums
 from src.db import init_db, make_engine, make_session_factory
@@ -178,17 +177,30 @@ def options() -> OptionsOut:
 # --------------------------------------------------------------------------- #
 
 
-@app.post("/api/containers", response_model=ContainerOut, status_code=201, dependencies=[Depends(admin)])
+@app.post(
+    "/api/containers",
+    response_model=ContainerOut,
+    status_code=201,
+    dependencies=[Depends(admin)],
+)
 def register_container(body: ContainerIn, yard: Yard) -> Container:
     return yard.register(Container(**body.model_dump()))
 
 
-@app.get("/api/containers", response_model=list[ContainerOut], dependencies=[Depends(viewer)])
-def list_containers(yard: Yard, q: str | None = None, limit: int = 1000) -> list[Container]:
+@app.get(
+    "/api/containers", response_model=list[ContainerOut], dependencies=[Depends(viewer)]
+)
+def list_containers(
+    yard: Yard, q: str | None = None, limit: int = 1000
+) -> list[Container]:
     return yard.list_containers(q, limit)
 
 
-@app.get("/api/containers/{number}", response_model=ContainerOut, dependencies=[Depends(viewer)])
+@app.get(
+    "/api/containers/{number}",
+    response_model=ContainerOut,
+    dependencies=[Depends(viewer)],
+)
 def get_container(number: str, yard: Yard) -> Container:
     try:
         return yard.get(number)
@@ -196,7 +208,11 @@ def get_container(number: str, yard: Yard) -> Container:
         raise HTTPException(404, str(e))
 
 
-@app.patch("/api/containers/{number}", response_model=ContainerOut, dependencies=[Depends(admin)])
+@app.patch(
+    "/api/containers/{number}",
+    response_model=ContainerOut,
+    dependencies=[Depends(admin)],
+)
 def update_container(number: str, body: ContainerUpdate, yard: Yard) -> Container:
     """Fix a typo in the registry. Does not touch that container's event history."""
     try:
@@ -213,7 +229,11 @@ def delete_container(number: str, yard: Yard) -> None:
     yard.delete_container(number)
 
 
-@app.get("/api/containers/{number}/state", response_model=StateOut, dependencies=[Depends(viewer)])
+@app.get(
+    "/api/containers/{number}/state",
+    response_model=StateOut,
+    dependencies=[Depends(viewer)],
+)
 def container_state(number: str, yard: Yard) -> StateOut:
     try:
         return _state_out(yard.state(number))
@@ -221,12 +241,18 @@ def container_state(number: str, yard: Yard) -> StateOut:
         raise HTTPException(404, str(e))
 
 
-@app.get("/api/containers/{number}/history", response_model=list[EventOut], dependencies=[Depends(viewer)])
+@app.get(
+    "/api/containers/{number}/history",
+    response_model=list[EventOut],
+    dependencies=[Depends(viewer)],
+)
 def container_history(number: str, yard: Yard):
     return yard.history(yard.get(number).number)
 
 
-@app.get("/api/yard/on-site", response_model=list[StateOut], dependencies=[Depends(viewer)])
+@app.get(
+    "/api/yard/on-site", response_model=list[StateOut], dependencies=[Depends(viewer)]
+)
 def on_site(
     yard: Yard,
     q: str | None = None,
@@ -241,7 +267,9 @@ def on_site(
     `purpose` keeps only containers plugged in for that reason; `cleanable=true`
     drops containers already cleaned this visit.
     """
-    states = yard.on_site(q, reefer=reefer, plugged=plugged, purpose=purpose, cleanable=cleanable)
+    states = yard.on_site(
+        q, reefer=reefer, plugged=plugged, purpose=purpose, cleanable=cleanable
+    )
     return [_state_out(st) for st in states[:limit]]
 
 
@@ -260,48 +288,79 @@ def list_events(
     limit: int = 500,
 ):
     """Event log for the viewer, newest first. Dates are inclusive bounds on `at`."""
-    return yard.events(kind=kind, q=q, date_from=date_from, date_to=date_to, limit=limit)
+    return yard.events(
+        kind=kind, q=q, date_from=date_from, date_to=date_to, limit=limit
+    )
 
 
-@app.patch("/api/events/{event_id}", response_model=EventOut, dependencies=[Depends(admin)])
+@app.patch(
+    "/api/events/{event_id}", response_model=EventOut, dependencies=[Depends(admin)]
+)
 def edit_event(event_id: int, body: EventEdit, yard: Yard):
     """Correct a typo on an event. `at`/`kind`/`container_number` can't change."""
     return yard.edit_event(event_id, **body.model_dump(exclude_unset=True))
 
 
-@app.delete("/api/events/{event_id}", response_model=EventOut, dependencies=[Depends(admin)])
+@app.delete(
+    "/api/events/{event_id}", response_model=EventOut, dependencies=[Depends(admin)]
+)
 def delete_event(event_id: int, yard: Yard):
     """Delete an event. Only the most recent event for its container may go —
     the server explains what to delete first otherwise."""
     return yard.void_event(event_id)
 
 
-@app.post("/api/events/gate-in", response_model=StateOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/events/gate-in",
+    response_model=StateOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def gate_in(body: GateInRequest, yard: Yard) -> StateOut:
     container = Container(**body.container.model_dump())
     data = body.model_dump(exclude={"container"})
     return _state_out(yard.gate_in(container, **data))
 
 
-@app.post("/api/events/gate-out", response_model=StateOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/events/gate-out",
+    response_model=StateOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def gate_out(body: GateOutRequest, yard: Yard) -> StateOut:
     data = body.model_dump(exclude={"container_number"})
     return _state_out(yard.gate_out(body.container_number, **data))
 
 
-@app.post("/api/events/plug-in", response_model=StateOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/events/plug-in",
+    response_model=StateOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def plug_in(body: PlugInRequest, yard: Yard) -> StateOut:
     data = body.model_dump(exclude={"container_number"})
     return _state_out(yard.plug_in(body.container_number, **data))
 
 
-@app.post("/api/events/plug-out", response_model=StateOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/events/plug-out",
+    response_model=StateOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def plug_out(body: PlugOutRequest, yard: Yard) -> StateOut:
     data = body.model_dump(exclude={"container_number"})
     return _state_out(yard.plug_out(body.container_number, **data))
 
 
-@app.post("/api/events/cleaning", response_model=StateOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/events/cleaning",
+    response_model=StateOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def cleaning(body: CleaningRequest, yard: Yard) -> StateOut:
     return _state_out(
         yard.clean(
@@ -314,13 +373,22 @@ def cleaning(body: CleaningRequest, yard: Yard) -> StateOut:
     )
 
 
-@app.post("/api/temperature", response_model=TemperatureReadingOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/temperature",
+    response_model=TemperatureReadingOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def create_temperature(body: TemperatureRequest, yard: Yard) -> TemperatureReadingOut:
     data = body.model_dump(exclude={"container_number"})
     return yard.temperature_check(body.container_number, **data)
 
 
-@app.get("/api/temperature", response_model=list[TemperatureReadingOut], dependencies=[Depends(viewer)])
+@app.get(
+    "/api/temperature",
+    response_model=list[TemperatureReadingOut],
+    dependencies=[Depends(viewer)],
+)
 def list_temperature(
     yard: Yard,
     q: str | None = None,
@@ -329,21 +397,36 @@ def list_temperature(
     limit: int = 500,
 ):
     """Temperature-round readings, newest first. Dates are inclusive bounds on `at`."""
-    return yard.temperature_readings(q=q, date_from=date_from, date_to=date_to, limit=limit)
+    return yard.temperature_readings(
+        q=q, date_from=date_from, date_to=date_to, limit=limit
+    )
 
 
-@app.patch("/api/temperature/{reading_id}", response_model=TemperatureReadingOut, dependencies=[Depends(admin)])
+@app.patch(
+    "/api/temperature/{reading_id}",
+    response_model=TemperatureReadingOut,
+    dependencies=[Depends(admin)],
+)
 def edit_temperature(reading_id: int, body: TemperatureEdit, yard: Yard):
     return yard.edit_temperature(reading_id, **body.model_dump(exclude_unset=True))
 
 
-@app.delete("/api/temperature/{reading_id}", response_model=TemperatureReadingOut, dependencies=[Depends(admin)])
+@app.delete(
+    "/api/temperature/{reading_id}",
+    response_model=TemperatureReadingOut,
+    dependencies=[Depends(admin)],
+)
 def delete_temperature(reading_id: int, yard: Yard):
     """Void a reading. Kept for the audit trail, shown struck through in Records."""
     return yard.void_temperature(reading_id)
 
 
-@app.post("/api/events/cross-stuff", response_model=StateOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/events/cross-stuff",
+    response_model=StateOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def cross_stuff(body: CrossStuffRequest, yard: Yard) -> StateOut:
     data = body.model_dump(exclude={"container_number"})
     return _state_out(yard.cross_stuff(body.container_number, **data))
@@ -354,23 +437,36 @@ def cross_stuff(body: CrossStuffRequest, yard: Yard) -> StateOut:
 # --------------------------------------------------------------------------- #
 
 
-@app.post("/api/unmatched", response_model=UnmatchedOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/unmatched",
+    response_model=UnmatchedOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def create_unmatched(body: UnmatchedIn, yard: Yard):
     """Keep a submission for a container the yard doesn't have where expected."""
     return yard.record_unmatched(**body.model_dump())
 
 
-@app.get("/api/unmatched", response_model=list[UnmatchedOut], dependencies=[Depends(viewer)])
+@app.get(
+    "/api/unmatched", response_model=list[UnmatchedOut], dependencies=[Depends(viewer)]
+)
 def list_unmatched(yard: Yard, include_resolved: bool = False):
     return yard.unmatched(include_resolved=include_resolved)
 
 
-@app.post("/api/unmatched/{record_id}/resolve", response_model=UnmatchedOut, dependencies=[Depends(operator)])
+@app.post(
+    "/api/unmatched/{record_id}/resolve",
+    response_model=UnmatchedOut,
+    dependencies=[Depends(operator)],
+)
 def resolve_unmatched(record_id: int, yard: Yard):
     return yard.resolve_unmatched(record_id)
 
 
-@app.delete("/api/unmatched/{record_id}", status_code=204, dependencies=[Depends(admin)])
+@app.delete(
+    "/api/unmatched/{record_id}", status_code=204, dependencies=[Depends(admin)]
+)
 def delete_unmatched(record_id: int, yard: Yard) -> None:
     """Remove an unmatched record outright, e.g. a duplicate or test entry."""
     yard.delete_unmatched(record_id)
@@ -381,17 +477,26 @@ def delete_unmatched(record_id: int, yard: Yard) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@app.post("/api/shifting", response_model=ShiftingOut, status_code=201, dependencies=[Depends(operator)])
+@app.post(
+    "/api/shifting",
+    response_model=ShiftingOut,
+    status_code=201,
+    dependencies=[Depends(operator)],
+)
 def create_shifting(body: ShiftingIn, yard: Yard):
     return yard.shift(**body.model_dump())
 
 
-@app.get("/api/shifting", response_model=list[ShiftingOut], dependencies=[Depends(viewer)])
+@app.get(
+    "/api/shifting", response_model=list[ShiftingOut], dependencies=[Depends(viewer)]
+)
 def list_shifting(yard: Yard, limit: int = 100):
     return yard.shifting_jobs(limit)
 
 
-@app.patch("/api/shifting/{job_id}", response_model=ShiftingOut, dependencies=[Depends(admin)])
+@app.patch(
+    "/api/shifting/{job_id}", response_model=ShiftingOut, dependencies=[Depends(admin)]
+)
 def update_shifting(job_id: int, body: ShiftingEdit, yard: Yard):
     return yard.edit_shifting(job_id, **body.model_dump())
 
@@ -431,14 +536,20 @@ def list_users(users: Users):
     return users.list()
 
 
-@app.post("/api/users", response_model=UserOut, status_code=201, dependencies=[Depends(admin)])
+@app.post(
+    "/api/users", response_model=UserOut, status_code=201, dependencies=[Depends(admin)]
+)
 def create_user(body: UserCreate, users: Users):
     return users.create(username=body.username, password=body.password, role=body.role)
 
 
-@app.patch("/api/users/{user_id}", response_model=UserOut, dependencies=[Depends(admin)])
+@app.patch(
+    "/api/users/{user_id}", response_model=UserOut, dependencies=[Depends(admin)]
+)
 def update_user(user_id: int, body: UserUpdate, users: Users, actor: CurrentUser):
-    return users.update(user_id, acting_user_id=actor.id, **body.model_dump(exclude_unset=True))
+    return users.update(
+        user_id, acting_user_id=actor.id, **body.model_dump(exclude_unset=True)
+    )
 
 
 @app.delete("/api/users/{user_id}", status_code=204, dependencies=[Depends(admin)])
@@ -534,10 +645,10 @@ _MARIMO_HEAD = """
 def _marimo_require_login(inner):
     async def guard(scope, receive, send):
         if scope["type"] in ("http", "websocket"):
-            await inner(scope,receive,send)
+            await inner(scope, receive, send)
             return
 
-        connection = HttpConnection(scope)
+        connection = HTTPConnection(scope)
         with SessionLocal() as session:
             user = auth.user_from_session(session, connection)
         if user is None:
@@ -559,11 +670,17 @@ try:
 
     _reports = (
         _marimo.create_asgi_app(include_code=False, html_head=_MARIMO_HEAD)
-        .with_app(path="/dashboard", root=str(DASHBOARD_NB), middleware=[_marimo_require_login])
+        .with_app(
+            path="/dashboard",
+            root=str(DASHBOARD_NB),
+            middleware=[_marimo_require_login],
+        )
         .build()
     )
     app.mount("/reports", _reports)
 except Exception as _exc:  # noqa: BLE001 - a broken notebook must not take the API down with it
     import logging
 
-    logging.getLogger("uvicorn.error").warning("report at /reports/dashboard not mounted: %s", _exc)
+    logging.getLogger("uvicorn.error").warning(
+        "report at /reports/dashboard not mounted: %s", _exc
+    )

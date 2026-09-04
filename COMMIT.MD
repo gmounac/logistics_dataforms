@@ -3,4 +3,4 @@
 * Make _append() use the complete container timeline
 * Added more tests for cross-stuffing
 * Stop generic event edits from creating impossible records
-* Added CLI
+* Added CI workflow to github

@@ -6,16 +6,15 @@ All writes go through YardService so the invariants live in one place:
   * plug in only for reefers that aren't already plugged; plug out closes it
   * events for a container are chronological
 """
-from re import A
-from ssl import ALERT_DESCRIPTION_UNKNOWN_PSK_IDENTITY
-from tests.test_schemas import test_dry_container_rejects_reefer_fields
-from multiprocessing import allow_connection_pickling
-from pydantic import Field, Annotated,BaseModel
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar, Annotated
+from multiprocessing import allow_connection_pickling
+from re import A
+from ssl import ALERT_DESCRIPTION_UNKNOWN_PSK_IDENTITY
+from typing import Annotated, ClassVar
 
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -230,15 +229,19 @@ class YardService:
         They aren't in the container's own `events`, but they change its cargo
         status, so state derivation has to see them.
         """
-        return list(
-            self.s.scalars(
-                select(Event).where(
-                    Event.kind == EventKind.CROSS_STUFF,
-                    Event.new_container_number == number,
-                    Event.voided_at.is_(None),
-                )
+
+        number = number.strip().upper()
+
+        stmt = (
+            select(Event)
+            .where(
+                Event.new_container_number == number,
+                Event.voided_at.is_(None),
             )
+            .order_by(Event.at.desc(), Event.id.desc())
         )
+
+        return list(self.s.scalars(stmt))
 
     def _timeline(self, number: str) -> list[Event]:
         own = self.history(number)
@@ -270,22 +273,22 @@ class YardService:
             stmt = stmt.where(Container.number.contains(q.strip().upper()))
         containers = list(self.s.scalars(stmt))
 
-        inbound: dict[str, list[Event]] = {}
-        for e in self.s.scalars(
-            select(Event).where(
-                Event.kind == EventKind.CROSS_STUFF,
-                Event.new_container_number.is_not(None),
-                Event.voided_at.is_(None),
-            )
-        ):
-            inbound.setdefault(e.new_container_number, []).append(e)
+        # inbound: dict[str, list[Event]] = {}
+        # for e in self.s.scalars(
+        #     select(Event).where(
+        #         Event.kind == EventKind.CROSS_STUFF,
+        #         Event.new_container_number.is_not(None),
+        #         Event.voided_at.is_(None),
+        #     )
+        # ):
+        #     inbound.setdefault(e.new_container_number, []).append(e)
 
-        def timeline(c: Container) -> list[Event]:
-            own = [e for e in c.events if e.voided_at is None]
-            extra = inbound.get(c.number)
-            return sorted(own + extra, key=lambda e: (e.at, e.id)) if extra else own
+        # def timeline(c: Container) -> list[Event]:
+        #     own = [e for e in c.events if e.voided_at is None]
+        #     extra = inbound.get(c.number)
+        #     return sorted(own + extra, key=lambda e: (e.at, e.id)) if extra else own
 
-        states = (self.fold(c, timeline(c)) for c in containers)
+        states = (self.fold(c, self._timeline(c.number)) for c in containers)
         return [
             st
             for st in states
@@ -395,11 +398,11 @@ class YardService:
         at: datetime,
         purpose: PlugPurpose,
         generator: Generator | None = None,
-        set_point_c: float = Field(ge=-70, le=30),
-        supply_temp_c: float = Field(ge=-70, le=30),
-        return_temp_c: float = Field(ge=-70, le=30),
+        set_point_c: float | None = None,
+        supply_temp_c: float | None = None,
+        return_temp_c: float | None = None,
         seal_number: str | None = None,
-        tare_weight_kg: int = Field(default=None, ge=1000, le=9999),
+        tare_weight_kg: int | None = None,
         cargo_status: ContainerStatus | None = None,
         comments: str = "",
     ) -> ContainerState:
@@ -611,19 +614,24 @@ class YardService:
         follow from the folded event log, so nothing is written twice.
         """
         c = self.get(number)
-        if target is CrossStuffTarget.CONTAINER:
+
+        receiver_number: str | None = None
+
+        if target == CrossStuffTarget.CONTAINER:
             if not new_container_number:
                 raise YardError(
                     "a new container number is required when transferring to a container"
                 )
             nc = self.get(new_container_number)
+
             if nc.number == c.number:
                 raise YardError("the new container is the same as the original")
+
             if not self.state(nc.number).on_site:
                 raise YardError(f"{nc.number} (the new container) is not in the yard")
 
-
             receiver_timeline = self._timeline(nc.number)
+
             if receiver_timeline and at < receiver_timeline[-1].at:
                 latest = receiver_timeline[-1]
                 raise YardError(
@@ -631,19 +639,20 @@ class YardService:
                     f"is earlier than the latest event affecting the receiving container at {latest.at:%Y-%m-%d %H:%M}"
                 )
 
-            new_container_number = nc.number
-        else:
-            new_container_number = None
+            receiver_number = nc.number
+
+        event = CrossStuff(
+            container_number=c.number,
+            at=at,
+            ended_at=ended_at,
+            cross_stuff_target=target,
+            new_container_number=receiver_number,
+            original_emptied=original_emptied,
+            comments=comments,
+        )
+
         return self._append(
-            CrossStuff(
-                container_number=c.number,
-                at=at,
-                ended_at=ended_at,
-                cross_stuff_target=target,
-                new_container_number=new_container_number,
-                original_emptied=original_emptied,
-                comments=comments,
-            ),
+            event,
             require_on_site=True,
         )
 
@@ -764,87 +773,101 @@ class YardService:
     #     them is really "this was a different event", which is a delete +
     #     re-entry, not a correction.
 
-
-
     type EventKindFields = dict[EventKind, frozenset[str]]
 
     EDITABLE_EVENT_FIELDS: ClassVar[EventKindFields] = {
-        EventKind.GATE_IN: frozenset({
-            "comments",
-            "hauler",
-            "hauler_plate",
-            "cargo_status",
-            "pti_status",
-        }),
-        EventKind.GATE_OUT: frozenset({
-            "comments",
-            "hauler",
-            "hauler_plate",
-            "destination",
-            "cargo_status",
-        }),
-        EventKind.PLUG_IN: frozenset({
-            "comments",
-            "generator",
-            "set_point_c",
-            "supply_temp_c",
-            "return_temp_c",
-            "seal_number",
-            "tare_weight_kg",
-            "cargo_status",
-        }),
-
-        EventKind.PTI_PLUG_IN: frozenset({
-            "comments",
-            "generator",
-            "set_point_c",
-        }),
-        EventKind.PLUG_OUT: frozenset({
-            "comments",
-            "supply_temp_c",
-            "return_temp_c",
-        }),
-        EventKind.PTI_PLUG_OUT: frozenset({
-            "comments",
-            "sticker",
-        }),
-        EventKind.CLEANING: frozenset({
-            "comments",
-            "result",
-            "cross_stuffed",
-        }),
-        EventKind.TEMPERATURE: frozenset({
-            "comments",
-            "time_slot",
-            "set_point_c",
-            "supply_temp_c",
-            "return_temp_c",
-            "remark",
-        }),
-        EventKind.CROSS_STUFF: frozenset({
-            "comments",
-            "original_emptied",
-        }),
-
+        EventKind.GATE_IN: frozenset(
+            {
+                "comments",
+                "hauler",
+                "hauler_plate",
+                "cargo_status",
+                "pti_status",
+            }
+        ),
+        EventKind.GATE_OUT: frozenset(
+            {
+                "comments",
+                "hauler",
+                "hauler_plate",
+                "destination",
+                "cargo_status",
+            }
+        ),
+        EventKind.PLUG_IN: frozenset(
+            {
+                "comments",
+                "generator",
+                "set_point_c",
+                "supply_temp_c",
+                "return_temp_c",
+                "seal_number",
+                "tare_weight_kg",
+                "cargo_status",
+            }
+        ),
+        EventKind.PTI_PLUG_IN: frozenset(
+            {
+                "comments",
+                "generator",
+                "set_point_c",
+            }
+        ),
+        EventKind.PLUG_OUT: frozenset(
+            {
+                "comments",
+                "supply_temp_c",
+                "return_temp_c",
+            }
+        ),
+        EventKind.PTI_PLUG_OUT: frozenset(
+            {
+                "comments",
+                "sticker",
+            }
+        ),
+        EventKind.CLEANING: frozenset(
+            {
+                "comments",
+                "result",
+                "cross_stuffed",
+            }
+        ),
+        EventKind.TEMPERATURE: frozenset(
+            {
+                "comments",
+                "time_slot",
+                "set_point_c",
+                "supply_temp_c",
+                "return_temp_c",
+                "remark",
+            }
+        ),
+        EventKind.CROSS_STUFF: frozenset(
+            {
+                "comments",
+                "original_emptied",
+            }
+        ),
     }
 
-def _validate_set_point(
-    self,
-    container: Container,
-    set_point_c: float | None,
-) -> None:
-    if set_point_c is None:
-        raise YardError("set point is required")
+    def _validate_set_point(
+        self,
+        container: Container,
+        set_point_c: float | None,
+    ) -> None:
+        if set_point_c is None:
+            raise YardError("set point is required")
 
-    if container.reefer_type is None:
-        raise YardError(f"{container.number} has no reefer type")
+        if container.reefer_type is None:
+            raise YardError(f"{container.number} has no reefer type")
 
-    if set_point_c < container.reefer_type.min_temperature_c:
-        raise YardError(
-            f"set point {set_point_c}°C is below the "
-            f"{container.reefer_type} minimum of "
-            f"{container.reefer_type.min_temperature_c}°C"
-        )
+        if set_point_c < container.reefer_type.min_temperature_c:
+            raise YardError(
+                f"set point {set_point_c}°C is below the "
+                f"{container.reefer_type} minimum of "
+                f"{container.reefer_type.min_temperature_c}°C"
+            )
 
     def _validate_edited_event(self, ev: Event) -> None:
         if ev.comments is None:
@@ -857,8 +880,10 @@ def _validate_set_point(
                 if ev.purpose is not PlugPurpose.PTI:
                     raise YardError("purpose must be PTI for PTI plug-in")
                 if ev.generator is None:
-                    raise YardError("A generator number is required and cannot be null for a PTI plug-in")
-                self._validate_set_point(container,ev.set_point_c)
+                    raise YardError(
+                        "A generator number is required and cannot be null for a PTI plug-in"
+                    )
+                self._validate_set_point(container, ev.set_point_c)
             case PlugIn():
                 if ev.purpose is not PlugPurpose.STORAGE:
                     raise YardError("purpose must be STORAGE for plug-in")
@@ -879,28 +904,37 @@ def _validate_set_point(
 
             case GateIn():
                 if ev.cargo_status is ContainerStatus.COMPLETED:
-                    raise YardError("Completed is a plug-in status, not a gate-in status")
+                    raise YardError(
+                        "Completed is a plug-in status, not a gate-in status"
+                    )
 
                 if container.is_reefer:
                     if ev.pti_status in (None, PTIStatus.NA):
                         raise YardError("PTI status is required for reefers")
-                    if ev.cargo_status is not ContainerStatus.EMPTY and ev.pti_status is PTIStatus.NON_PTI:
+                    if (
+                        ev.cargo_status is not ContainerStatus.EMPTY
+                        and ev.pti_status is PTIStatus.NON_PTI
+                    ):
                         raise YardError("A loaded reefer cannot be non-PTI")
                 else:
                     if ev.cargo_status is ContainerStatus.PARTIAL:
-                        raise YardError("A dry container cannot be represented as partial")
-            case Cleaning():
-                    if (
-                        ev.cleaning_result is CleaningResult.OTHER
-                        and not ev.comments.strip()
-                    ):
                         raise YardError(
-                            "comments are required when cleaning result is Other"
+                            "A dry container cannot be represented as partial"
                         )
-
-
-
-
+            case Cleaning():
+                if (
+                    ev.cleaning_result is CleaningResult.OTHER
+                    and not ev.comments.strip()
+                ):
+                    raise YardError(
+                        "comments are required when cleaning result is Other"
+                    )
+            case CrossStuff():
+                if ev.container_number == container.number:
+                    if ev.original_emptied:
+                        ev.cargo_status = ContainerStatus.EMPTY
+                    elif ev.new_container_number == container.number:
+                        ev.cargo_status = ContainerStatus.FULL
 
     def edit_event(self, event_id: int, **fields) -> Event:
         """Edit an event's fields. Raises YardError if the event is voided or unknown."""
@@ -912,7 +946,9 @@ def _validate_set_point(
         allowed = self.EDITABLE_EVENT_FIELDS.get(ev.kind, frozenset())
         invalid = set(fields) - allowed
         if invalid:
-            raise YardError(f"cannot edit on {ev.kind.value}: {', '.join(sorted(invalid))}")
+            raise YardError(
+                f"cannot edit on {ev.kind.value}: {', '.join(sorted(invalid))}"
+            )
 
         try:
             for k, v in fields.items():
@@ -928,7 +964,7 @@ def _validate_set_point(
         """Return the container numbers affected by this event."""
         numbers = [event.container_number]
 
-        if isinstance(event, CrossStuff) and event.new_container_number:
+        if event.new_container_number:
             numbers.append(event.new_container_number)
 
         return numbers
@@ -941,23 +977,23 @@ def _validate_set_point(
         if ev is None or ev.voided_at is not None:
             raise YardError(f"no active event {event_id}")
 
-        for number in self._affected_containers(ev)
+        for number in self._affected_containers(ev):
             timeline = self._timeline(number)
 
-            if not timeline or timeline[-1].id != ev.id:
-                latest = timeline[-1] if timeline else None
-
-                if latest is not None:
-                    raise YardError(
-                        f"only the most recent event for {number} can be deleted — "
-                        f"that's the {latest.kind.value.replace('_', ' ')} at {latest.at:%Y-%m-%d %H:%M}"
-                    )
+            if not timeline:
                 raise YardError(f"{number} has no active events to delete")
 
+            latest = timeline[-1]
+
+            if latest.id != ev.id:
+                raise YardError(
+                    f"cannot delete this event because {number} has a later"
+                    f" {latest.kind.value.replace('_', ' ')} at {latest.at:%Y-%m-%d %H:%M}"
+                )
 
         from src.db import utcnow
 
-        ev.voided_at:datetime = utcnow()
+        ev.voided_at = utcnow()
         self.s.commit()
         return ev
 

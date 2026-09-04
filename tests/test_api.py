@@ -275,7 +275,7 @@ def test_delete_non_latest_event_is_409_with_guidance(client):
     gate_in_id = next(e["id"] for e in events if e["kind"] == "gate_in")
     r = client.delete(f"/api/events/{gate_in_id}")
     assert r.status_code == 409
-    assert "most recent" in r.json()["detail"]
+    assert "later" in r.json()["detail"]
 
 
 def test_edit_event_comment(client):
