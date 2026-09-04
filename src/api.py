@@ -649,7 +649,7 @@ def _marimo_require_login(app: ASGIApp) -> ASGIApp:
     Middleware that requires the user to be logged in to access the inner app.
     """
     async def guard(scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] in ("http", "websocket"):
+        if scope["type"] not in ("http", "websocket"):
             await app(scope, receive, send)
             return
 
