@@ -16,7 +16,7 @@
     table { font-size: 14px; }
     th, td { white-space: nowrap; }
     td.wrap { white-space: normal; min-width: 180px; }
-    tbody tr:hover { background: #fdf0e4; }
+    tbody tr:hover { background: var(--signal-wash); }
     .copied { color: var(--ok); font-size: 14px; }
     .manage-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 14px; }
     .manage-toggle input { width: 18px; height: 18px; min-height: 0; }
@@ -29,10 +29,10 @@
     .voided-tag { font-size: 12px; color: var(--ink-soft); text-decoration: none; display: inline-block; margin-left: 6px; }
     tr.has-note { cursor: pointer; }
     .note-mark { margin-left: 6px; font-size: 12px; }
-    tr.note-row td { white-space: normal; background: #fdf0e4; color: var(--ink); font-size: 13px; padding: 8px 12px 12px; }
+    tr.note-row td { white-space: normal; background: var(--signal-wash); color: var(--ink); font-size: 13px; padding: 8px 12px 12px; }
 
     dialog#editDialog { border: 1px solid var(--line); border-radius: var(--radius); padding: 0; max-width: 480px; width: 92vw; }
-    dialog#editDialog::backdrop { background: rgba(27,36,48,.45); }
+    dialog#editDialog::backdrop { background: var(--shadow-strong); }
     dialog#editDialog .body { padding: 20px; }
     dialog#editDialog h2 { font-size: 18px; margin: 0 0 4px; }
     dialog#editDialog .sub { color: var(--ink-soft); font-size: 14px; margin-bottom: 16px; }

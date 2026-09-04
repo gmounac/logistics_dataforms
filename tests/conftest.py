@@ -14,16 +14,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from src.auth import hash_password
 from src.db import Base
 from src.enums import (
     ContainerReeferType,
     ContainerSize,
     ContainerType,
+    Role,
     ShippingLine,
     UnitManufacturer,
 )
-from src.models import Container, iso6346_check_digit
-from src.services import YardService
+from src.models import Container, User, iso6346_check_digit
+from src.services import UserService, YardService
 
 NOW = datetime.now(UTC)
 
@@ -77,22 +79,65 @@ def yard(session) -> YardService:
     return YardService(session)
 
 
-@pytest.fixture
-def client(session_factory) -> Iterator[TestClient]:
-    """FastAPI client wired to the test database via a dependency override."""
-    from src.api import app, get_yard
+# username -> role for the accounts every client fixture seeds.
+SEED_USERS = {"admin": Role.ADMIN, "operator": Role.OPERATOR, "viewer": Role.VIEWER}
+SEED_PASSWORD = "test-pass-123"
 
-    def _override() -> Iterator[YardService]:
-        s = session_factory()
-        try:
+
+def _seed_users(session_factory) -> None:
+    with session_factory() as s:
+        if s.query(User).count():
+            return
+        for name, role in SEED_USERS.items():
+            s.add(User(username=name, password_hash=hash_password(SEED_PASSWORD), role=role))
+        s.commit()
+
+
+def _make_client(session_factory) -> Iterator[TestClient]:
+    from src.api import app, get_users, get_yard
+
+    def _yard() -> Iterator[YardService]:
+        with session_factory() as s:
             yield YardService(s)
-        finally:
-            s.close()
 
-    app.dependency_overrides[get_yard] = _override
+    def _users() -> Iterator[UserService]:
+        with session_factory() as s:
+            yield UserService(s)
+
+    _seed_users(session_factory)
+    app.dependency_overrides[get_yard] = _yard
+    app.dependency_overrides[get_users] = _users
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def anon_client(session_factory) -> Iterator[TestClient]:
+    """Not signed in."""
+    yield from _make_client(session_factory)
+
+
+@pytest.fixture
+def client(session_factory) -> Iterator[TestClient]:
+    """Signed in as an admin — the default for existing tests."""
+    for c in _make_client(session_factory):
+        assert c.post("/api/login", json={"username": "admin", "password": SEED_PASSWORD}).status_code == 200
+        yield c
+
+
+@pytest.fixture
+def operator_client(session_factory) -> Iterator[TestClient]:
+    for c in _make_client(session_factory):
+        assert c.post("/api/login", json={"username": "operator", "password": SEED_PASSWORD}).status_code == 200
+        yield c
+
+
+@pytest.fixture
+def viewer_client(session_factory) -> Iterator[TestClient]:
+    for c in _make_client(session_factory):
+        assert c.post("/api/login", json={"username": "viewer", "password": SEED_PASSWORD}).status_code == 200
+        yield c
 
 
 # --------------------------------------------------------------------------- #

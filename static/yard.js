@@ -2,6 +2,70 @@
 window.Yard = (() => {
   const $ = (id) => document.getElementById(id);
 
+  // ------------------------------------------------------------- theme
+  // Three states: "system" (follow the OS), "light", "dark". The choice lives
+  // in localStorage per device. This script is in <head> with no defer, so the
+  // apply below runs before the body paints — no flash of the wrong theme.
+  const THEME_KEY = "yardTheme";
+  const THEMES = ["system", "light", "dark"];
+  const themeLabel = { system: "Theme: auto", light: "Theme: light", dark: "Theme: dark" };
+
+  function readTheme() {
+    try { const t = localStorage.getItem(THEME_KEY); return THEMES.includes(t) ? t : "system"; }
+    catch (e) { return "system"; }
+  }
+  function applyTheme(t) {
+    const root = document.documentElement;
+    if (t === "light" || t === "dark") root.setAttribute("data-theme", t);
+    else root.removeAttribute("data-theme");
+  }
+  function setTheme(t) {
+    try { t === "system" ? localStorage.removeItem(THEME_KEY) : localStorage.setItem(THEME_KEY, t); }
+    catch (e) { /* private mode: session-only */ }
+    applyTheme(t);
+  }
+  applyTheme(readTheme());
+
+  function mountThemeToggle() {
+    const header = document.querySelector("header");
+    if (!header || header.querySelector(".theme-toggle")) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "theme-toggle";
+    btn.textContent = themeLabel[readTheme()];
+    btn.addEventListener("click", () => {
+      const next = THEMES[(THEMES.indexOf(readTheme()) + 1) % THEMES.length];
+      setTheme(next);
+      btn.textContent = themeLabel[next];
+    });
+    header.appendChild(btn);
+  }
+  async function mountAccount() {
+    const header = document.querySelector("header");
+    if (!header || location.pathname === "/login" || header.querySelector(".account")) return;
+    let me;
+    try { me = await fetch("/api/me").then((r) => (r.ok ? r.json() : null)); } catch (e) { return; }
+    if (!me) return;
+    const span = document.createElement("span");
+    span.className = "account";
+    span.textContent = me.username + " · ";
+    const out = document.createElement("button");
+    out.type = "button";
+    out.className = "linklike";
+    out.textContent = "Sign out";
+    out.addEventListener("click", async () => {
+      await fetch("/api/logout", { method: "POST" });
+      location.href = "/login";
+    });
+    span.appendChild(out);
+    header.appendChild(span);
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    try { mountThemeToggle(); } catch (e) { console.error(e); }
+    try { mountAccount(); } catch (e) { console.error(e); }
+  });
+
   // ------------------------------------------------------------- form bits
   function fill(select, values, placeholder = "Select", keep = false) {
     const prev = keep ? select.value : "";
@@ -130,6 +194,11 @@ window.Yard = (() => {
       headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+    if (res.status === 401) {
+      // session gone — send them to sign in and come back here
+      location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search);
+      return { ok: false, data: {}, message: "Session expired." };
+    }
     const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
     if (res.ok) return { ok: true, data };
     const message = Array.isArray(data.detail)

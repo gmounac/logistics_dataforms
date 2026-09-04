@@ -167,6 +167,21 @@ class CrossStuffTarget(_StrEnum):
     CARGO_VESSEL = "Cargo Vessel"
 
 
+class Role(_StrEnum):
+    """Who may do what. Hierarchical: each role includes the ones before it."""
+
+    VIEWER = "viewer"
+    """Read-only: every GET."""
+    OPERATOR = "operator"
+    """Viewer + record new events, temperature readings, shifting, unmatched."""
+    ADMIN = "admin"
+    """Operator + edit/void records, the container registry, and user accounts."""
+
+    @property
+    def rank(self) -> int:
+        return {"viewer": 0, "operator": 1, "admin": 2}[self.value]
+
+
 class EventKind(_StrEnum):
     GATE_IN = "gate_in"
     GATE_OUT = "gate_out"

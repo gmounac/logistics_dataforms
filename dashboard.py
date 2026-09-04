@@ -87,7 +87,7 @@ def _():
         f"Loaded **{events.height}** events and **{temps.height}** temperature readings "
         f"across **{containers.height}** registered containers."
     )
-    return activity, events, temps
+    return activity, temps
 
 
 @app.cell
@@ -202,35 +202,9 @@ def _():
     return (container_selection,)
 
 
-@app.cell
-def _(activity):
-    all_data = activity.sort("at", descending=True).select(
-        (pl.col("at") + pl.duration(hours=4)).alias("When"),
-        pl.col("activity").alias("Activity"),
-        pl.col("container_number").alias("Container"),
-    )
-
-
-    result = all_data
-
-    return (result,)
-
-
-@app.cell(hide_code=True)
-def _(engine, events):
-    _df = mo.sql(
-        f"""
-        FROM events
-        WHERE kind IN ('gate_in','plug_in') 
-        """,
-        engine=engine
-    )
-    return
-
-
 @app.cell(hide_code=True)
 def _(container_selection, engine):
-    _df = mo.sql(
+    result = mo.sql(
         f"""
         WITH ev AS (SELECT
             kind,
@@ -241,7 +215,7 @@ def _(container_selection, engine):
             "pti_status",
             "sticker",
             "cleaning_result"
-    
+
         FROM
             main.events
         WHERE
@@ -259,9 +233,10 @@ def _(container_selection, engine):
             e.comments
         FROM ev e LEFT JOIN cnt c ON c.number = e.container_number
         """,
+        output=False,
         engine=engine
     )
-    return
+    return (result,)
 
 
 @app.cell

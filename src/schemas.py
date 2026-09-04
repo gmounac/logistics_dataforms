@@ -31,6 +31,7 @@ from src.enums import (
     Hauler,
     PlugPurpose,
     PTIStatus,
+    Role,
     ShippingLine,
     Sticker,
     TemperatureRemark,
@@ -481,3 +482,59 @@ class ShiftingEdit(BaseModel):
     customer: Customer
     container_numbers: list[ContainerNumber] = Field(min_length=1)
     remarks: str = Field(min_length=1)
+
+
+# --------------------------------------------------------------------------- #
+# Accounts
+# --------------------------------------------------------------------------- #
+
+Username = Annotated[str, StringConstraints(strip_whitespace=True, to_lower=True, min_length=1, max_length=40)]
+
+
+class LoginRequest(BaseModel):
+    username: Username
+    password: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    username: str
+    role: Role
+    disabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class MeOut(BaseModel):
+    """The signed-in account plus the flags the UI uses to show/hide controls."""
+
+    id: int
+    username: str
+    role: Role
+    can_record: bool
+    can_admin: bool
+
+    @classmethod
+    def of(cls, user):
+        return cls(
+            id=user.id,
+            username=user.username,
+            role=user.role,
+            can_record=user.role.rank >= Role.OPERATOR.rank,
+            can_admin=user.role is Role.ADMIN,
+        )
+
+
+class UserCreate(BaseModel):
+    username: Username
+    password: str = Field(min_length=8)
+    role: Role
+
+
+class UserUpdate(BaseModel):
+    """Only the set fields change. `username` is fixed once created."""
+
+    role: Role | None = None
+    disabled: bool | None = None
+    password: str | None = Field(default=None, min_length=8)

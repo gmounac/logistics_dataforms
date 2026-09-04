@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.enums import (
@@ -25,6 +25,7 @@ from src.enums import (
     Hauler,
     PlugPurpose,
     PTIStatus,
+    Role,
     Sticker,
     TemperatureRemark,
     TimeSlot,
@@ -43,6 +44,7 @@ from src.models import (
     ShiftingJob,
     TemperatureReading,
     UnmatchedRecord,
+    User,
     is_valid_number_format,
     iso6346_check_digit,
 )
@@ -738,4 +740,90 @@ class YardService:
         if rec is None:
             raise YardError(f"no unmatched record {record_id}")
         self.s.delete(rec)
+        self.s.commit()
+
+
+class UserService:
+    """Account CRUD. Kept apart from YardService — different concern, same session."""
+
+    MIN_PASSWORD_LEN = 8
+
+    def __init__(self, session: Session) -> None:
+        self.s = session
+
+    def authenticate(self, username: str, password: str) -> User:
+        from src.auth import needs_rehash, verify_password
+
+        user = self.s.scalar(select(User).where(User.username == username.strip().lower()))
+        if user is None or user.disabled or not verify_password(user.password_hash, password):
+            raise YardError("wrong username or password")
+        if needs_rehash(user.password_hash):
+            from src.auth import hash_password
+
+            user.password_hash = hash_password(password)
+            self.s.commit()
+        return user
+
+    def list(self) -> list[User]:
+        return list(self.s.scalars(select(User).order_by(User.username)))
+
+    def get(self, user_id: int) -> User:
+        user = self.s.get(User, user_id)
+        if user is None:
+            raise YardError(f"no user {user_id}")
+        return user
+
+    def create(self, *, username: str, password: str, role: Role) -> User:
+        from src.auth import hash_password
+
+        username = username.strip().lower()
+        if not username:
+            raise YardError("username is required")
+        if len(password) < self.MIN_PASSWORD_LEN:
+            raise YardError(f"password must be at least {self.MIN_PASSWORD_LEN} characters")
+        if self.s.scalar(select(User.id).where(User.username == username)):
+            raise YardError(f"{username} already exists")
+        user = User(username=username, password_hash=hash_password(password), role=role)
+        self.s.add(user)
+        self.s.commit()
+        return user
+
+    def update(
+        self,
+        user_id: int,
+        *,
+        role: Role | None = None,
+        disabled: bool | None = None,
+        password: str | None = None,
+        acting_user_id: int | None = None,
+    ) -> User:
+        from src.auth import hash_password
+
+        user = self.get(user_id)
+        if user_id == acting_user_id and (disabled is True or (role is not None and role is not user.role)):
+            raise YardError("you cannot change your own role or disable yourself")
+        if role is not None:
+            user.role = role
+        if disabled is not None:
+            user.disabled = disabled
+        if password is not None:
+            if len(password) < self.MIN_PASSWORD_LEN:
+                raise YardError(f"password must be at least {self.MIN_PASSWORD_LEN} characters")
+            user.password_hash = hash_password(password)
+        self.s.commit()
+        return user
+
+    def delete(self, user_id: int, *, acting_user_id: int | None = None) -> None:
+        if user_id == acting_user_id:
+            raise YardError("you cannot delete your own account")
+        user = self.get(user_id)
+        if user.role is Role.ADMIN:
+            others = self.s.scalar(
+                select(func.count(User.id)).where(
+                    User.role == Role.ADMIN, User.disabled.is_(False), User.id != user_id
+                )
+            )
+            if not others:
+                raise YardError("cannot delete the last active admin")
+        self.s.delete(user)
         self.s.commit()

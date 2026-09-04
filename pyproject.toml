@@ -5,8 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "argon2-cffi>=25.1.0",
     "duckdb>=1.5.5",
     "fastapi[standard]>=0.141.1",
+    "itsdangerous>=2.2.0",
+    "marimo>=0.24.0",
     "polars[pyarrow]>=1.44.1",
     "scan-google-sheet>=0.3.0",
     "sqlalchemy>=2.0.52",

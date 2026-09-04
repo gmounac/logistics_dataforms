@@ -1,14 +1,66 @@
 :root {
+  color-scheme: light;
   --ink: #1b2430;
   --ink-soft: #5b6673;
   --line: #c9d0d8;
   --paper: #f5f6f8;
   --field: #ffffff;
+  --card: #ffffff;
   --signal: #e5731a;   /* hi-vis orange: the one accent */
   --signal-ink: #8a3f05;
+  --signal-hover: #cf6512;
+  --signal-wash: #fdf0e4;
   --ok: #1f7a4d;
+  --ok-wash: #eef8f2;
   --bad: #b3261e;
+  --bad-wash: #fdf3f2;
+  --shadow: rgba(27, 36, 48, .12);
+  --shadow-strong: rgba(27, 36, 48, .28);
   --radius: 6px;
+}
+
+/* Dark palette. Used when the viewer picks "dark", and — unless they have
+   explicitly picked "light" — when their OS is in dark mode. The two selectors
+   carry the same values; CSS has no way to share them. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e7eaed;
+  --ink-soft: #98a2ad;
+  --line: #363d46;
+  --paper: #13171b;
+  --field: #1d232a;
+  --card: #1d232a;
+  --signal: #f0862e;
+  --signal-ink: #f2a866;
+  --signal-hover: #d9761f;
+  --signal-wash: #2b2015;
+  --ok: #46c78a;
+  --ok-wash: #15241d;
+  --bad: #f2635a;
+  --bad-wash: #2b1a18;
+  --shadow: rgba(0, 0, 0, .45);
+  --shadow-strong: rgba(0, 0, 0, .6);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ink: #e7eaed;
+    --ink-soft: #98a2ad;
+    --line: #363d46;
+    --paper: #13171b;
+    --field: #1d232a;
+    --card: #1d232a;
+    --signal: #f0862e;
+    --signal-ink: #f2a866;
+    --signal-hover: #d9761f;
+    --signal-wash: #2b2015;
+    --ok: #46c78a;
+    --ok-wash: #15241d;
+    --bad: #f2635a;
+    --bad-wash: #2b1a18;
+    --shadow: rgba(0, 0, 0, .45);
+    --shadow-strong: rgba(0, 0, 0, .6);
+  }
 }
 * { box-sizing: border-box; }
 html { background: var(--paper); }
@@ -25,6 +77,17 @@ header nav { flex: none; }
 header nav a { margin-left: 14px; }
 header a { color: var(--ink-soft); text-decoration: none; font-size: 14px; }
 header a:hover { color: var(--ink); text-decoration: underline; }
+button.theme-toggle {
+  flex: none; min-height: 0; padding: 6px 10px; font: inherit; font-size: 13px;
+  color: var(--ink-soft); background: var(--field);
+  border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+}
+button.theme-toggle:hover { color: var(--ink); }
+header .account { flex: none; color: var(--ink-soft); font-size: 14px; }
+button.linklike {
+  min-height: 0; padding: 0; font: inherit; font-size: 14px; background: none;
+  border: 0; color: var(--signal-ink); text-decoration: underline; cursor: pointer;
+}
 
 fieldset { border: 0; padding: 0; margin: 0 0 22px; }
 legend { width: 100%; font-weight: 600; padding: 0 0 6px; margin-bottom: 12px; border-bottom: 2px solid var(--ink); }
@@ -60,7 +123,7 @@ button.primary {
   width: 100%; min-height: 52px; font: inherit; font-size: 17px; font-weight: 600;
   color: #fff; background: var(--signal); border: 0; border-radius: var(--radius); cursor: pointer;
 }
-button.primary:hover { background: #cf6512; }
+button.primary:hover { background: var(--signal-hover); }
 button.primary:disabled { opacity: .6; cursor: progress; }
 
 /* Keep the form's submit button in reach on a long page: it rides along the
@@ -68,7 +131,7 @@ button.primary:disabled { opacity: .6; cursor: progress; }
    at the end. Scoped to buttons inside a <form> so dialog buttons are unaffected. */
 form button.primary {
   position: sticky; bottom: 12px; z-index: 5;
-  box-shadow: 0 3px 14px rgba(27, 36, 48, .28);
+  box-shadow: 0 3px 14px var(--shadow-strong);
 }
 /* the "＋ Add note" button that stands in for a collapsed Notes section */
 #notesToggle { margin-bottom: 22px; }
@@ -76,11 +139,11 @@ form button.primary {
 
 .alert { display: none; padding: 12px 14px; border-radius: var(--radius); margin-bottom: 18px; border: 1px solid; }
 .alert.show { display: block; }
-.alert.bad { color: var(--bad); border-color: var(--bad); background: #fdf3f2; }
-.alert.ok  { color: var(--ok);  border-color: var(--ok);  background: #eef8f2; }
+.alert.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-wash); }
+.alert.ok  { color: var(--ok);  border-color: var(--ok);  background: var(--ok-wash); }
 
 /* Confirmation: the container number is the thing the gate clerk needs to read back */
-.receipt { display: none; margin-bottom: 22px; padding: 16px; border-left: 6px solid var(--ok); background: #fff; }
+.receipt { display: none; margin-bottom: 22px; padding: 16px; border-left: 6px solid var(--ok); background: var(--card); }
 .receipt.show { display: block; }
 .receipt .num { font-size: 28px; letter-spacing: .1em; font-weight: 600; font-variant-numeric: tabular-nums; }
 .receipt dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 10px 0 0; font-size: 14px; }
@@ -94,18 +157,18 @@ form button.primary {
 .picker ul {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 10;
   margin: 0; padding: 4px 0; list-style: none; background: var(--field);
-  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 6px 18px rgba(27,36,48,.12);
+  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 6px 18px var(--shadow);
   max-height: 45vh; overflow-y: auto; display: none;
 }
 .picker ul.open { display: block; }
 .picker li { padding: 12px; min-height: 44px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.picker li:hover, .picker li[aria-selected="true"] { background: #fdf0e4; }
+.picker li:hover, .picker li[aria-selected="true"] { background: var(--signal-wash); }
 .picker li .num { letter-spacing: .08em; font-variant-numeric: tabular-nums; font-weight: 600; }
 .picker li .meta, .picker li.empty { color: var(--ink-soft); font-size: 14px; }
 .picker li.empty { cursor: default; justify-content: center; }
 
 /* On-file summary shown once a container is chosen */
-.onfile { display: none; margin-top: 10px; padding: 12px 14px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); }
+.onfile { display: none; margin-top: 10px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 .onfile.show { display: block; }
 .onfile dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; font-size: 14px; }
 .onfile dt { color: var(--ink-soft); }
@@ -117,7 +180,7 @@ form button.primary {
    to a single line so the operator only confirms the number. */
 .known {
   display: none; margin: 6px 0 14px; padding: 12px 14px;
-  background: #fff; border: 1px solid var(--line); border-left: 5px solid var(--ok);
+  background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--ok);
   border-radius: var(--radius);
 }
 .known.show { display: block; }
@@ -147,7 +210,7 @@ th { font-weight: 600; color: var(--ink-soft); font-size: 13px; }
 td.num { letter-spacing: .08em; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 td .sub { display: block; color: var(--ink-soft); font-size: 13px; }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
-.tag.plug { border-color: var(--signal); color: var(--signal-ink); background: #fdf0e4; }
+.tag.plug { border-color: var(--signal); color: var(--signal-ink); background: var(--signal-wash); }
 .empty-row td { color: var(--ink-soft); text-align: center; padding: 28px; }
 @media (max-width: 640px) { .hide-sm { display: none; } }
 
@@ -157,7 +220,7 @@ td .sub { display: block; color: var(--ink-soft); font-size: 13px; }
   border-radius: var(--radius); color: var(--ink); text-decoration: none;
 }
 .actions a { border-left: 5px solid var(--signal); }
-.actions a:hover { background: #fdf0e4; }
+.actions a:hover { background: var(--signal-wash); }
 .actions span { color: var(--ink-soft); }
 .actions b { display: block; font-weight: 600; }
 .actions small { display: block; margin-top: 2px; color: var(--ink-soft); }
@@ -165,7 +228,7 @@ td .sub { display: block; color: var(--ink-soft); font-size: 13px; }
 /* Unlisted container path */
 .picker li.unlisted { border-top: 1px dashed var(--line); }
 .picker li.unlisted .meta { color: var(--signal-ink); }
-.unlisted-box { display: none; margin-top: 10px; padding: 12px 14px; border-left: 5px solid var(--signal); background: #fdf0e4; border-radius: var(--radius); }
+.unlisted-box { display: none; margin-top: 10px; padding: 12px 14px; border-left: 5px solid var(--signal); background: var(--signal-wash); border-radius: var(--radius); }
 .unlisted-box.show { display: block; }
 .unlisted-box .num { letter-spacing: .08em; font-weight: 600; font-variant-numeric: tabular-nums; }
 .unlisted-box .sub { color: var(--ink-soft); font-size: 14px; margin-top: 4px; }

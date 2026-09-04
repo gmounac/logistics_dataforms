@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in · Container Yard</title>
+  <link rel="stylesheet" href="/static/yard.css" />
+  <script src="/static/yard.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="/static/mobile-logo.png" alt="Container Yard" />
+    <h1>Sign in</h1>
+  </header>
+
+  <div id="alert" class="alert" role="alert"></div>
+
+  <form id="form" novalidate>
+    <div class="field">
+      <label for="username" class="req">Username</label>
+      <input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required />
+      <div class="err" id="usernameErr"></div>
+    </div>
+    <div class="field">
+      <label for="password" class="req">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <div class="err" id="passwordErr"></div>
+    </div>
+    <button type="submit" class="primary" id="submit">Sign in</button>
+  </form>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const params = new URLSearchParams(location.search);
+      const next = params.get("next") || "/";
+      const form = $("form");
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        Yard.hideAlert();
+        const btn = $("submit");
+        btn.disabled = true;
+        try {
+          const res = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: $("username").value, password: $("password").value }),
+          });
+          if (res.ok) {
+            location.href = next.startsWith("/") ? next : "/";
+            return;
+          }
+          const data = await res.json().catch(() => ({}));
+          Yard.alert("bad", data.detail || "Could not sign in.");
+        } catch (e) {
+          Yard.alert("bad", "Network error — try again.");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</main>
+</body>
+</html>

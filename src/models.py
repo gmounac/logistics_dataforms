@@ -28,6 +28,7 @@ from src.enums import (
     Hauler,
     PlugPurpose,
     PTIStatus,
+    Role,
     ShippingLine,
     Sticker,
     TemperatureRemark,
@@ -295,3 +296,25 @@ class TemperatureReading(Base):
 
     def __repr__(self) -> str:
         return f"TemperatureReading({self.container_number} {self.time_slot} @ {self.at:%Y-%m-%d})"
+
+
+# --------------------------------------------------------------------------- #
+# Accounts
+# --------------------------------------------------------------------------- #
+
+
+class User(Base):
+    """A login. `role` decides what the account may do — see enums.Role."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[Role] = mapped_column(_enum(Role))
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+    def __repr__(self) -> str:
+        return f"User({self.username}, {self.role}{', disabled' if self.disabled else ''})"
