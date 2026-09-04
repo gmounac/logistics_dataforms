@@ -1,7 +1,6 @@
 """YardService invariants — the rules that keep the event log foldable."""
 
 from datetime import timedelta
-from sys import orig_argv
 
 import pytest
 

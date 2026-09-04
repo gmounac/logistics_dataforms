@@ -1,6 +1,7 @@
 """Request-model validation — the business rules that used to live in Apps Script."""
 
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -105,7 +106,9 @@ def test_gate_in_loaded_reefer_cannot_be_non_pti():
 def test_gate_in_dry_container_cannot_be_partial():
     with pytest.raises(ValidationError, match="cannot be Partial"):
         GateInRequest(
-            **_gate_in_body(container=dry_payload(), cargo_status="Partial", pti_status=None)
+            **_gate_in_body(
+                container=dry_payload(), cargo_status="Partial", pti_status=None
+            )
         )
 
 
@@ -158,14 +161,14 @@ def test_tare_weight_bounds():
 
 
 def test_cleaning_other_needs_a_comment():
-    base = dict(at=(NOW - timedelta(hours=1)).isoformat(), container_number=CONT_A)
+    base: dict[str, Any] = dict(at=(NOW - timedelta(hours=1)).isoformat(), container_number=CONT_A)
     with pytest.raises(ValidationError, match="say what happened"):
         CleaningRequest(**base, result="Other")
     CleaningRequest(**base, result="Other", comments="door damage")
 
 
 def test_temperature_alarm_needs_a_comment():
-    base = dict(
+    base: dict[str, Any] = dict(
         at=(NOW - timedelta(hours=1)).isoformat(),
         container_number=CONT_A,
         time_slot="AM",

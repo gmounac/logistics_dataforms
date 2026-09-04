@@ -9,12 +9,8 @@ All writes go through YardService so the invariants live in one place:
 
 from dataclasses import dataclass
 from datetime import datetime
-from multiprocessing import allow_connection_pickling
-from re import A
-from ssl import ALERT_DESCRIPTION_UNKNOWN_PSK_IDENTITY
-from typing import Annotated, ClassVar
+from typing import ClassVar
 
-from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -406,13 +402,20 @@ class YardService:
         cargo_status: ContainerStatus | None = None,
         comments: str = "",
     ) -> ContainerState:
+        """Plugs in a reefer container, validating the set point against the reefer type."""
         c = self.get(number)
         if not c.is_reefer:
             raise YardError(f"{c.number} is not a reefer")
-        if set_point_c < c.reefer_type.min_temperature_c:
+        reefer_type = c.reefer_type
+        if reefer_type is None:
+            raise YardError(f"{c.number} has no reefer type")
+        if set_point_c is None:
+            raise YardError("set_point_c is required")
+
+        if set_point_c < reefer_type.min_temperature_c:
             raise YardError(
-                f"set point {set_point_c}°C is below the {c.reefer_type} "
-                f"minimum of {c.reefer_type.min_temperature_c}°C"
+                f"set point {set_point_c}°C is below the {reefer_type} "
+                f"minimum of {reefer_type.min_temperature_c}°C"
             )
         if self.state(c.number).is_plugged:
             raise YardError(f"{c.number} is already plugged in")
@@ -446,9 +449,15 @@ class YardService:
     ) -> ContainerState:
         c = self.get(number)
         st = self.state(c.number)
+
+        plugged_in = st.plugged_in
+
+        if plugged_in is None:
+            raise YardError(f"{c.number} is not plugged in")
+
         if not st.is_plugged:
             raise YardError(f"{c.number} is not plugged in")
-        closing_pti = st.plugged_in.purpose is PlugPurpose.PTI
+        closing_pti = plugged_in.purpose is PlugPurpose.PTI
         if closing_pti and sticker is None:
             raise YardError("a sticker is required when plugging out from a PTI")
         plug_out_cls = PtiPlugOut if closing_pti else PlugOut
@@ -456,8 +465,8 @@ class YardService:
             plug_out_cls(
                 container_number=c.number,
                 at=at,
-                plug_in_id=st.plugged_in.id,
-                purpose=st.plugged_in.purpose,
+                plug_in_id=plugged_in.id,
+                purpose=plugged_in.purpose,
                 supply_temp_c=supply_temp_c,
                 return_temp_c=return_temp_c,
                 sticker=sticker,
@@ -517,11 +526,15 @@ class YardService:
         """
         c = self.get(number)
         st = self.state(c.number)
-        if not st.is_plugged:
+
+        plugged_in = st.plugged_in
+
+        if plugged_in is None:
             raise YardError(f"{c.number} is not plugged in")
-        if at < st.plugged_in.at:
+
+        if at < plugged_in.at:
             raise YardError(
-                f"reading is before the plug in at {st.plugged_in.at:%Y-%m-%d %H:%M}"
+                f"reading is before the plug in at {plugged_in.at:%Y-%m-%d %H:%M}"
             )
         reading = TemperatureReading(
             container_number=c.number,
@@ -987,8 +1000,8 @@ class YardService:
 
             if latest.id != ev.id:
                 raise YardError(
-                    f"cannot delete this event because {number} has a later"
-                    f" {latest.kind.value.replace('_', ' ')} at {latest.at:%Y-%m-%d %H:%M}"
+                    f"only the most recent event for {number} can be deleted; "
+                    f"there is a later {latest.kind.value.replace('_', ' ')} at {latest.at:%Y-%m-%d %H:%M}"
                 )
 
         from src.db import utcnow
@@ -1064,7 +1077,7 @@ class UserService:
             self.s.commit()
         return user
 
-    def list(self) -> list[User]:
+    def list_(self) -> list[User]:
         return list(self.s.scalars(select(User).order_by(User.username)))
 
     def get(self, user_id: int) -> User:

@@ -43,7 +43,7 @@ def main(argv: list[str]) -> None:
 
     try:
         if cmd == "list":
-            rows = users.list()
+            rows = users.list_()
             if not rows:
                 print("(no users yet — create one with:  uv run manage.py add <name> admin)")
             for u in rows:
@@ -79,7 +79,7 @@ def main(argv: list[str]) -> None:
 
 
 def _find(users: UserService, username: str):
-    for u in users.list():
+    for u in users.list_():
         if u.username == username.strip().lower():
             return u
     sys.exit(f"no user {username!r}")

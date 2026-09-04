@@ -11,13 +11,14 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Final
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import HTTPConnection
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src import auth, enums
 from src.db import init_db, make_engine, make_session_factory
@@ -53,13 +54,13 @@ from src.schemas import (
 )
 from src.services import ContainerState, UserService, YardError, YardService
 
-DATABASE_URL = os.environ.get("YARD_DATABASE_URL", "sqlite:///yard.db")
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+DATABASE_URL: str = os.environ.get("YARD_DATABASE_URL", "sqlite:///yard.db")
+STATIC_DIR: Path = Path(__file__).resolve().parent.parent / "static"
 
 # Signs the session cookie. Set YARD_SECRET_KEY in production; without it a
 # random key is used, so every restart logs everyone out.
-SECRET_KEY = os.environ.get("YARD_SECRET_KEY") or secrets.token_hex(32)
-SESSION_MAX_AGE = 14 * 24 * 3600  # two weeks
+SECRET_KEY: str = os.environ.get("YARD_SECRET_KEY") or secrets.token_hex(32)
+SESSION_MAX_AGE: Final[int] = 14 * 24 * 3600  # two weeks
 
 engine = make_engine(DATABASE_URL)
 SessionLocal = make_session_factory(engine)
@@ -381,7 +382,8 @@ def cleaning(body: CleaningRequest, yard: Yard) -> StateOut:
 )
 def create_temperature(body: TemperatureRequest, yard: Yard) -> TemperatureReadingOut:
     data = body.model_dump(exclude={"container_number"})
-    return yard.temperature_check(body.container_number, **data)
+    reading = yard.temperature_check(body.container_number, **data)
+    return TemperatureReadingOut.model_validate(reading)
 
 
 @app.get(
@@ -533,7 +535,7 @@ def me(user: CurrentUser) -> MeOut:
 
 @app.get("/api/users", response_model=list[UserOut], dependencies=[Depends(admin)])
 def list_users(users: Users):
-    return users.list()
+    return users.list_()
 
 
 @app.post(
@@ -642,13 +644,16 @@ _MARIMO_HEAD = """
 """
 
 
-def _marimo_require_login(inner):
-    async def guard(scope, receive, send):
+def _marimo_require_login(app: ASGIApp) -> ASGIApp:
+    """
+    Middleware that requires the user to be logged in to access the inner app.
+    """
+    async def guard(scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in ("http", "websocket"):
-            await inner(scope, receive, send)
+            await app(scope, receive, send)
             return
 
-        connection = HTTPConnection(scope)
+        connection   = HTTPConnection(scope)
         with SessionLocal() as session:
             user = auth.user_from_session(session, connection)
         if user is None:
@@ -660,7 +665,7 @@ def _marimo_require_login(inner):
                     status_code=303,
                 )(scope, receive, send)
             return
-        await inner(scope, receive, send)
+        await app(scope, receive, send)
 
     return guard
 

@@ -159,7 +159,7 @@ def period_report(activity: pl.DataFrame, kind: str, anchor: dt.date, temps: pl.
     chart = mo.ui.altair_chart(
         alt.Chart(by_bucket)
         .mark_bar()
-        .encode(
+        .encode( # ty: ignore[unresolved-attribute]
             x=alt.X("bucket:T", title="Hour" if kind == "day" else "Day"),
             y=alt.Y("count:Q", title="Records", stack=True),
             color=alt.Color("activity:N", title="Activity", sort=KIND_ORDER),
