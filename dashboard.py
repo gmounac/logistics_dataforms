@@ -51,6 +51,7 @@ def _():
     # id, kind, container_number, at, comments
 
 
+
     _events = _read("SELECT id, kind, container_number, at, comments FROM events WHERE voided_at IS NULL")
     _temps = _read(
         "SELECT id, container_number, at, time_slot, set_point_c, supply_temp_c, "
@@ -197,80 +198,14 @@ def period_report(activity: pl.DataFrame, kind: str, anchor: dt.date, temps: pl.
 
 
 @app.cell
-def _():
-    container_selection = mo.ui.text(label="Search for container:",max_length=11)
-    return (container_selection,)
-
-
-@app.cell(hide_code=True)
-def _(container_selection, engine):
-    result = mo.sql(
-        f"""
-        WITH ev AS (SELECT
-            kind,
-            container_number,
-            "at"::DATETIME  + INTERVAL 4 HOUR AS datetime,
-            "comments",
-            "cargo_status",
-            "pti_status",
-            "sticker",
-            "cleaning_result"
-
-        FROM
-            main.events
-        WHERE
-            container_number = '{container_selection.value}'),cnt AS (FROM main.containers)
-
-            SELECT 
-            	e.kind,
-            	e.container_number,
-            	e.datetime,
-            c.shipping_line,
-            e.cargo_status AS entry_status,
-            e.pti_status,
-            e.sticker,
-            e.cleaning_result,
-            e.comments
-        FROM ev e LEFT JOIN cnt c ON c.number = e.container_number
-        """,
-        output=False,
-        engine=engine
-    )
-    return (result,)
-
-
-@app.cell
-def _():
-    import duckdb
-
-    DATABASE_URL = "yard.db"
-    engine = duckdb.connect(DATABASE_URL, read_only=False)
-    return (engine,)
-
-
-@app.cell
-def _(
-    activity,
-    container_selection,
-    day_anchor,
-    month_anchor,
-    result,
-    temps,
-    week_anchor,
-):
+def _(activity, day_anchor, month_anchor, temps, week_anchor):
     mo.ui.tabs(
         {
             "Daily": mo.vstack([day_anchor, period_report(activity, "day", day_anchor.value, temps)]),
             "Weekly": mo.vstack([week_anchor, period_report(activity, "week", week_anchor.value, temps)]),
             "Monthly": mo.vstack([month_anchor, period_report(activity, "month", month_anchor.value, temps)]),
-            "All":mo.vstack([container_selection,result])
         }
     )
-    return
-
-
-@app.cell
-def _():
     return
 
 

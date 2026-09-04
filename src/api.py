@@ -4,6 +4,7 @@ Run with:  uvicorn src.api:app --reload
 Docs at:   http://127.0.0.1:8000/docs
 Gate-in:   http://127.0.0.1:8000/gate-in
 """
+from cmath import e
 
 import os
 import secrets
@@ -17,6 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import HttpConnection
 
 from src import auth, enums
 from src.db import init_db, make_engine, make_session_factory
@@ -504,6 +506,8 @@ DASHBOARD_NB = Path(__file__).resolve().parent.parent / "dashboard.py"
 
 # marimo serves the report full-screen with no way back to the yard, so drop a
 # floating link into every page it renders (html_head is injected into <head>).
+#
+# TODO: Move this to the static folder in a separate file
 _MARIMO_HEAD = """
 <style>
   #yard-back {
@@ -529,13 +533,21 @@ _MARIMO_HEAD = """
 
 def _marimo_require_login(inner):
     async def guard(scope, receive, send):
-        if scope["type"] in ("http", "websocket") and not scope.get("session", {}).get(auth.SESSION_KEY):
+        if scope["type"] in ("http", "websocket"):
+            await inner(scope,receive,send)
+            return
+
+        connection = HttpConnection(scope)
+        with SessionLocal() as session:
+            user = auth.user_from_session(session, connection)
+        if user is None:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
             else:
-                await RedirectResponse("/login?next=/reports/dashboard", status_code=303)(
-                    scope, receive, send
-                )
+                await RedirectResponse(
+                    url="/login?next=/reports/dashboard",
+                    status_code=303,
+                )(scope, receive, send)
             return
         await inner(scope, receive, send)
 

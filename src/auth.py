@@ -9,7 +9,7 @@ from __future__ import annotations
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from sqlalchemy.orm import Session
-from starlette.requests import Request
+from starlette.requests import HttpConnection
 
 from src.models import User
 
@@ -28,7 +28,7 @@ def verify_password(password_hash: str, password: str) -> bool:
     try:
         _ph.verify(password_hash, password)
         return True
-    except (VerifyMismatchError, InvalidHashError):
+    except VerifyMismatchError, InvalidHashError:
         return False
 
 
@@ -40,7 +40,7 @@ def needs_rehash(password_hash: str) -> bool:
         return True
 
 
-def user_from_session(session: Session, request: Request) -> User | None:
+def user_from_session(session: Session, request: HttpConnection) -> User | None:
     """The signed-in, still-active user for this request, or None."""
     uid = request.session.get(SESSION_KEY)
     if uid is None:

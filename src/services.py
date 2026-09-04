@@ -6,10 +6,15 @@ All writes go through YardService so the invariants live in one place:
   * plug in only for reefers that aren't already plugged; plug out closes it
   * events for a container are chronological
 """
+from re import A
+from ssl import ALERT_DESCRIPTION_UNKNOWN_PSK_IDENTITY
+from tests.test_schemas import test_dry_container_rejects_reefer_fields
+from multiprocessing import allow_connection_pickling
+from pydantic import Field, Annotated,BaseModel
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar
+from typing import ClassVar, Annotated
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -112,7 +117,13 @@ class YardService:
             self.s.add(container)
             self.s.flush()
             return container
-        for attr in ("shipping_line", "container_type", "size", "reefer_type", "unit_manufacturer"):
+        for attr in (
+            "shipping_line",
+            "container_type",
+            "size",
+            "reefer_type",
+            "unit_manufacturer",
+        ):
             if getattr(existing, attr) != getattr(container, attr):
                 raise YardError(
                     f"{existing.number} is on file as {getattr(existing, attr)} "
@@ -168,7 +179,13 @@ class YardService:
         for e in events:
             match e:
                 case GateIn():
-                    on_site, arrived, cargo, pti, plugged = True, e.at, e.cargo_status, e.pti_status, None
+                    on_site, arrived, cargo, pti, plugged = (
+                        True,
+                        e.at,
+                        e.cargo_status,
+                        e.pti_status,
+                        None,
+                    )
                     visit_cleaning = None
                     visit_count += 1
                 case GateOut():
@@ -201,7 +218,10 @@ class YardService:
             visit_count=visit_count,
             # the timeline may include cross-stuff events owned by another
             # container, so pick the last one that is actually this container's
-            last_event=next((e for e in reversed(events) if e.container_number == container.number), None),
+            last_event=next(
+                (e for e in reversed(events) if e.container_number == container.number),
+                None,
+            ),
         )
 
     def _inbound_cross_stuff(self, number: str) -> list[Event]:
@@ -267,11 +287,15 @@ class YardService:
 
         states = (self.fold(c, timeline(c)) for c in containers)
         return [
-            st for st in states
+            st
+            for st in states
             if st.on_site
             and (reefer is None or st.container.is_reefer == reefer)
             and (plugged is None or st.is_plugged == plugged)
-            and (purpose is None or (st.plugged_in is not None and st.plugged_in.purpose is purpose))
+            and (
+                purpose is None
+                or (st.plugged_in is not None and st.plugged_in.purpose is purpose)
+            )
             and (cleanable is None or (not st.cleaning_done) == cleanable)
         ]
 
@@ -279,15 +303,20 @@ class YardService:
     # Events
     # ------------------------------------------------------------------ #
 
-    def _append(self, event: Event, *, require_on_site: bool, strict_order: bool = True) -> ContainerState:
+    def _append(
+        self, event: Event, *, require_on_site: bool, strict_order: bool = True
+    ) -> ContainerState:
+        """Append an event to the container's timeline, returning the updated state."""
         c = self.get(event.container_number)
-        events = self.history(c.number)
-        st = self.fold(c, events)
+        timeline = self._timeline(c.number)
+        st = self.fold(c, timeline)
 
-        if strict_order and st.last_event and event.at < st.last_event.at:
+        latest = timeline[-1] if timeline else None
+
+        if strict_order and latest and event.at < latest.at:
             raise YardError(
                 f"{c.number}: event at {event.at:%Y-%m-%d %H:%M} is earlier than "
-                f"last event at {st.last_event.at:%Y-%m-%d %H:%M}"
+                f"last event affecting the container at {latest.at:%Y-%m-%d %H:%M}"
             )
         if require_on_site and not st.on_site:
             raise YardError(f"{c.number} is not in the yard")
@@ -296,7 +325,7 @@ class YardService:
 
         self.s.add(event)
         self.s.commit()
-        return self.fold(c, events + [event])
+        return self.state(c.number)
 
     def gate_in(
         self,
@@ -310,15 +339,24 @@ class YardService:
         comments: str = "",
     ) -> ContainerState:
         """Gate a container in. Pass a `Container` to register-on-first-sight."""
-        c = self.get(container) if isinstance(container, str) else self.ensure(container)
+        c = (
+            self.get(container)
+            if isinstance(container, str)
+            else self.ensure(container)
+        )
         if c.is_reefer and pti_status is None:
             raise YardError("pti_status is required for reefers")
         if not c.is_reefer and pti_status not in (None, PTIStatus.NA):
             raise YardError("pti_status only applies to reefers")
         return self._append(
             GateIn(
-                container_number=c.number, at=at, hauler=hauler, hauler_plate=hauler_plate,
-                cargo_status=cargo_status, pti_status=pti_status, comments=comments,
+                container_number=c.number,
+                at=at,
+                hauler=hauler,
+                hauler_plate=hauler_plate,
+                cargo_status=cargo_status,
+                pti_status=pti_status,
+                comments=comments,
             ),
             require_on_site=False,
         )
@@ -339,8 +377,13 @@ class YardService:
             raise YardError(f"{c.number} is still plugged in; plug out first")
         return self._append(
             GateOut(
-                container_number=c.number, at=at, hauler=hauler, hauler_plate=hauler_plate,
-                destination=destination, cargo_status=cargo_status, comments=comments,
+                container_number=c.number,
+                at=at,
+                hauler=hauler,
+                hauler_plate=hauler_plate,
+                destination=destination,
+                cargo_status=cargo_status,
+                comments=comments,
             ),
             require_on_site=True,
         )
@@ -352,11 +395,11 @@ class YardService:
         at: datetime,
         purpose: PlugPurpose,
         generator: Generator | None = None,
-        set_point_c: float,
-        supply_temp_c: float | None = None,
-        return_temp_c: float | None = None,
+        set_point_c: float = Field(ge=-70, le=30),
+        supply_temp_c: float = Field(ge=-70, le=30),
+        return_temp_c: float = Field(ge=-70, le=30),
         seal_number: str | None = None,
-        tare_weight_kg: int | None = None,
+        tare_weight_kg: int = Field(default=None, ge=1000, le=9999),
         cargo_status: ContainerStatus | None = None,
         comments: str = "",
     ) -> ContainerState:
@@ -373,10 +416,17 @@ class YardService:
         plug_cls = PtiPlugIn if purpose is PlugPurpose.PTI else PlugIn
         return self._append(
             plug_cls(
-                container_number=c.number, at=at, purpose=purpose, generator=generator,
-                set_point_c=set_point_c, supply_temp_c=supply_temp_c,
-                return_temp_c=return_temp_c, seal_number=seal_number,
-                tare_weight_kg=tare_weight_kg, cargo_status=cargo_status, comments=comments,
+                container_number=c.number,
+                at=at,
+                purpose=purpose,
+                generator=generator,
+                set_point_c=set_point_c,
+                supply_temp_c=supply_temp_c,
+                return_temp_c=return_temp_c,
+                seal_number=seal_number,
+                tare_weight_kg=tare_weight_kg,
+                cargo_status=cargo_status,
+                comments=comments,
             ),
             require_on_site=True,
         )
@@ -401,10 +451,14 @@ class YardService:
         plug_out_cls = PtiPlugOut if closing_pti else PlugOut
         return self._append(
             plug_out_cls(
-                container_number=c.number, at=at, plug_in_id=st.plugged_in.id,
+                container_number=c.number,
+                at=at,
+                plug_in_id=st.plugged_in.id,
                 purpose=st.plugged_in.purpose,
-                supply_temp_c=supply_temp_c, return_temp_c=return_temp_c,
-                sticker=sticker, comments=comments,
+                supply_temp_c=supply_temp_c,
+                return_temp_c=return_temp_c,
+                sticker=sticker,
+                comments=comments,
             ),
             require_on_site=True,
         )
@@ -426,8 +480,13 @@ class YardService:
                 "restuffed, otherwise it must gate out and back in first"
             )
         return self._append(
-            Cleaning(container_number=c.number, at=at, cleaning_result=result,
-                     cross_stuffed=cross_stuffed, comments=comments),
+            Cleaning(
+                container_number=c.number,
+                at=at,
+                cleaning_result=result,
+                cross_stuffed=cross_stuffed,
+                comments=comments,
+            ),
             require_on_site=True,
         )
 
@@ -458,11 +517,18 @@ class YardService:
         if not st.is_plugged:
             raise YardError(f"{c.number} is not plugged in")
         if at < st.plugged_in.at:
-            raise YardError(f"reading is before the plug in at {st.plugged_in.at:%Y-%m-%d %H:%M}")
+            raise YardError(
+                f"reading is before the plug in at {st.plugged_in.at:%Y-%m-%d %H:%M}"
+            )
         reading = TemperatureReading(
-            container_number=c.number, at=at, time_slot=time_slot, set_point_c=set_point_c,
-            supply_temp_c=supply_temp_c, return_temp_c=return_temp_c,
-            temperature_remark=remark, comments=comments,
+            container_number=c.number,
+            at=at,
+            time_slot=time_slot,
+            set_point_c=set_point_c,
+            supply_temp_c=supply_temp_c,
+            return_temp_c=return_temp_c,
+            temperature_remark=remark,
+            comments=comments,
         )
         self.s.add(reading)
         self.s.commit()
@@ -485,7 +551,9 @@ class YardService:
         if not include_voided:
             stmt = stmt.where(TemperatureReading.voided_at.is_(None))
         if q:
-            stmt = stmt.where(TemperatureReading.container_number.contains(q.strip().upper()))
+            stmt = stmt.where(
+                TemperatureReading.container_number.contains(q.strip().upper())
+            )
         if date_from:
             stmt = stmt.where(TemperatureReading.at >= date_from)
         if date_to:
@@ -493,8 +561,12 @@ class YardService:
         return list(self.s.scalars(stmt))
 
     TEMPERATURE_EDIT_FIELDS: ClassVar[set[str]] = {
-        "time_slot", "set_point_c", "supply_temp_c", "return_temp_c",
-        "temperature_remark", "comments",
+        "time_slot",
+        "set_point_c",
+        "supply_temp_c",
+        "return_temp_c",
+        "temperature_remark",
+        "comments",
     }
 
     def edit_temperature(self, reading_id: int, **fields) -> TemperatureReading:
@@ -515,6 +587,7 @@ class YardService:
         if r is None or r.voided_at is not None:
             raise YardError(f"no active temperature reading {reading_id}")
         from src.db import utcnow
+
         r.voided_at = utcnow()
         self.s.commit()
         return r
@@ -540,20 +613,36 @@ class YardService:
         c = self.get(number)
         if target is CrossStuffTarget.CONTAINER:
             if not new_container_number:
-                raise YardError("a new container number is required when transferring to a container")
+                raise YardError(
+                    "a new container number is required when transferring to a container"
+                )
             nc = self.get(new_container_number)
             if nc.number == c.number:
                 raise YardError("the new container is the same as the original")
             if not self.state(nc.number).on_site:
                 raise YardError(f"{nc.number} (the new container) is not in the yard")
+
+
+            receiver_timeline = self._timeline(nc.number)
+            if receiver_timeline and at < receiver_timeline[-1].at:
+                latest = receiver_timeline[-1]
+                raise YardError(
+                    f"{nc.number} cross-stuff at {at:%Y-%m-%d %H:%M} "
+                    f"is earlier than the latest event affecting the receiving container at {latest.at:%Y-%m-%d %H:%M}"
+                )
+
             new_container_number = nc.number
         else:
             new_container_number = None
         return self._append(
             CrossStuff(
-                container_number=c.number, at=at, ended_at=ended_at,
-                cross_stuff_target=target, new_container_number=new_container_number,
-                original_emptied=original_emptied, comments=comments,
+                container_number=c.number,
+                at=at,
+                ended_at=ended_at,
+                cross_stuff_target=target,
+                new_container_number=new_container_number,
+                original_emptied=original_emptied,
+                comments=comments,
             ),
             require_on_site=True,
         )
@@ -573,7 +662,9 @@ class YardService:
     ) -> UnmatchedRecord:
         number = container_number.strip().upper()
         if not is_valid_number_format(number):
-            raise YardError(f"{number!r} is not a container number (4 letters + 7 digits)")
+            raise YardError(
+                f"{number!r} is not a container number (4 letters + 7 digits)"
+            )
         rec = UnmatchedRecord(
             kind=kind,
             container_number=number,
@@ -597,6 +688,7 @@ class YardService:
         if rec is None:
             raise YardError(f"no unmatched record {record_id}")
         from src.db import utcnow
+
         rec.resolved_at = utcnow()
         self.s.commit()
         return rec
@@ -629,7 +721,9 @@ class YardService:
             if missing:
                 raise YardError("not in the yard: " + ", ".join(missing))
         text = remarks.strip() + (f" — {comments.strip()}" if comments.strip() else "")
-        job = ShiftingJob(at=at, customer=customer, container_numbers=numbers, remarks=text)
+        job = ShiftingJob(
+            at=at, customer=customer, container_numbers=numbers, remarks=text
+        )
         self.s.add(job)
         self.s.commit()
         return job
@@ -670,44 +764,206 @@ class YardService:
     #     them is really "this was a different event", which is a delete +
     #     re-entry, not a correction.
 
-    EDITABLE_EVENT_FIELDS: ClassVar[set[str]] = {
-        "comments", "hauler", "hauler_plate", "cargo_status", "pti_status", "destination",
-        "purpose", "generator", "set_point_c", "supply_temp_c", "return_temp_c",
-        "seal_number", "tare_weight_kg", "sticker", "cleaning_result", "cross_stuffed",
-        "cross_stuff_target", "new_container_number", "original_emptied",
+
+
+    type EventKindFields = dict[EventKind, frozenset[str]]
+
+    EDITABLE_EVENT_FIELDS: ClassVar[EventKindFields] = {
+        EventKind.GATE_IN: frozenset({
+            "comments",
+            "hauler",
+            "hauler_plate",
+            "cargo_status",
+            "pti_status",
+        }),
+        EventKind.GATE_OUT: frozenset({
+            "comments",
+            "hauler",
+            "hauler_plate",
+            "destination",
+            "cargo_status",
+        }),
+        EventKind.PLUG_IN: frozenset({
+            "comments",
+            "generator",
+            "set_point_c",
+            "supply_temp_c",
+            "return_temp_c",
+            "seal_number",
+            "tare_weight_kg",
+            "cargo_status",
+        }),
+
+        EventKind.PTI_PLUG_IN: frozenset({
+            "comments",
+            "generator",
+            "set_point_c",
+        }),
+        EventKind.PLUG_OUT: frozenset({
+            "comments",
+            "supply_temp_c",
+            "return_temp_c",
+        }),
+        EventKind.PTI_PLUG_OUT: frozenset({
+            "comments",
+            "sticker",
+        }),
+        EventKind.CLEANING: frozenset({
+            "comments",
+            "result",
+            "cross_stuffed",
+        }),
+        EventKind.TEMPERATURE: frozenset({
+            "comments",
+            "time_slot",
+            "set_point_c",
+            "supply_temp_c",
+            "return_temp_c",
+            "remark",
+        }),
+        EventKind.CROSS_STUFF: frozenset({
+            "comments",
+            "original_emptied",
+        }),
+
     }
 
+def _validate_set_point(
+    self,
+    container: Container,
+    set_point_c: float | None,
+) -> None:
+    if set_point_c is None:
+        raise YardError("set point is required")
+
+    if container.reefer_type is None:
+        raise YardError(f"{container.number} has no reefer type")
+
+    if set_point_c < container.reefer_type.min_temperature_c:
+        raise YardError(
+            f"set point {set_point_c}°C is below the "
+            f"{container.reefer_type} minimum of "
+            f"{container.reefer_type.min_temperature_c}°C"
+        )
+
+    def _validate_edited_event(self, ev: Event) -> None:
+        if ev.comments is None:
+            raise YardError("comments cannot be null")
+        container = self.get(ev.container_number)
+
+        match ev:
+            # Must be before Plugin as PTI plugin subclass Plugin
+            case PtiPlugIn():
+                if ev.purpose is not PlugPurpose.PTI:
+                    raise YardError("purpose must be PTI for PTI plug-in")
+                if ev.generator is None:
+                    raise YardError("A generator number is required and cannot be null for a PTI plug-in")
+                self._validate_set_point(container,ev.set_point_c)
+            case PlugIn():
+                if ev.purpose is not PlugPurpose.STORAGE:
+                    raise YardError("purpose must be STORAGE for plug-in")
+                if not ev.seal_number:
+                    raise YardError("A seal_number is requiredfor plug-in")
+
+                if ev.cargo_status is ContainerStatus.EMPTY:
+                    raise YardError("an empty reefer isn't plugged in for storage")
+
+                self._validate_set_point(container, ev.set_point_c)
+            case PtiPlugOut():
+                if ev.sticker is None:
+                    raise YardError("A sticker is required for PTI plug-out")
+
+            case PlugOut():
+                if ev.sticker is not None:
+                    raise YardError("A sticker is not required for plug-out")
+
+            case GateIn():
+                if ev.cargo_status is ContainerStatus.COMPLETED:
+                    raise YardError("Completed is a plug-in status, not a gate-in status")
+
+                if container.is_reefer:
+                    if ev.pti_status in (None, PTIStatus.NA):
+                        raise YardError("PTI status is required for reefers")
+                    if ev.cargo_status is not ContainerStatus.EMPTY and ev.pti_status is PTIStatus.NON_PTI:
+                        raise YardError("A loaded reefer cannot be non-PTI")
+                else:
+                    if ev.cargo_status is ContainerStatus.PARTIAL:
+                        raise YardError("A dry container cannot be represented as partial")
+            case Cleaning():
+                    if (
+                        ev.cleaning_result is CleaningResult.OTHER
+                        and not ev.comments.strip()
+                    ):
+                        raise YardError(
+                            "comments are required when cleaning result is Other"
+                        )
+
+
+
+
+
     def edit_event(self, event_id: int, **fields) -> Event:
+        """Edit an event's fields. Raises YardError if the event is voided or unknown."""
         ev = self.s.get(Event, event_id)
+
         if ev is None or ev.voided_at is not None:
             raise YardError(f"no active event {event_id}")
-        unknown = set(fields) - self.EDITABLE_EVENT_FIELDS
-        if unknown:
-            raise YardError(f"cannot edit: {', '.join(sorted(unknown))}")
-        for k, v in fields.items():
-            setattr(ev, k, v)
-        self.s.commit()
+
+        allowed = self.EDITABLE_EVENT_FIELDS.get(ev.kind, frozenset())
+        invalid = set(fields) - allowed
+        if invalid:
+            raise YardError(f"cannot edit on {ev.kind.value}: {', '.join(sorted(invalid))}")
+
+        try:
+            for k, v in fields.items():
+                setattr(ev, k, v)
+            self._validate_edited_event(ev)
+            self.s.commit()
+        except Exception:
+            self.s.rollback()
+            raise
         return ev
+
+    def _affected_containers(self, event: Event) -> list[str]:
+        """Return the container numbers affected by this event."""
+        numbers = [event.container_number]
+
+        if isinstance(event, CrossStuff) and event.new_container_number:
+            numbers.append(event.new_container_number)
+
+        return numbers
 
     def void_event(self, event_id: int) -> Event:
         """Delete an event. Only the most recent event for its container may go."""
+
         ev = self.s.get(Event, event_id)
+
         if ev is None or ev.voided_at is not None:
             raise YardError(f"no active event {event_id}")
-        hist = self.history(ev.container_number)
-        if not hist or hist[-1].id != ev.id:
-            if hist:
-                raise YardError(
-                    f"only the most recent event for {ev.container_number} can be deleted — "
-                    f"that's the {hist[-1].kind.value.replace('_', ' ')} at {hist[-1].at:%Y-%m-%d %H:%M}"
-                )
-            raise YardError(f"{ev.container_number} has no active events to delete")
+
+        for number in self._affected_containers(ev)
+            timeline = self._timeline(number)
+
+            if not timeline or timeline[-1].id != ev.id:
+                latest = timeline[-1] if timeline else None
+
+                if latest is not None:
+                    raise YardError(
+                        f"only the most recent event for {number} can be deleted — "
+                        f"that's the {latest.kind.value.replace('_', ' ')} at {latest.at:%Y-%m-%d %H:%M}"
+                    )
+                raise YardError(f"{number} has no active events to delete")
+
+
         from src.db import utcnow
-        ev.voided_at = utcnow()
+
+        ev.voided_at:datetime = utcnow()
         self.s.commit()
         return ev
 
-    def list_containers(self, q: str | None = None, limit: int = 1000) -> list[Container]:
+    def list_containers(
+        self, q: str | None = None, limit: int = 1000
+    ) -> list[Container]:
         stmt = select(Container).order_by(Container.number).limit(limit)
         if q:
             stmt = stmt.where(Container.number.contains(q.strip().upper()))
@@ -728,7 +984,9 @@ class YardService:
                 f"{c.number} has recorded events and can't be deleted; delete those first"
             )
         has_readings = self.s.scalar(
-            select(TemperatureReading.id).where(TemperatureReading.container_number == c.number).limit(1)
+            select(TemperatureReading.id)
+            .where(TemperatureReading.container_number == c.number)
+            .limit(1)
         )
         if has_readings:
             raise YardError(f"{c.number} has temperature readings and can't be deleted")
@@ -754,8 +1012,14 @@ class UserService:
     def authenticate(self, username: str, password: str) -> User:
         from src.auth import needs_rehash, verify_password
 
-        user = self.s.scalar(select(User).where(User.username == username.strip().lower()))
-        if user is None or user.disabled or not verify_password(user.password_hash, password):
+        user = self.s.scalar(
+            select(User).where(User.username == username.strip().lower())
+        )
+        if (
+            user is None
+            or user.disabled
+            or not verify_password(user.password_hash, password)
+        ):
             raise YardError("wrong username or password")
         if needs_rehash(user.password_hash):
             from src.auth import hash_password
@@ -780,7 +1044,9 @@ class UserService:
         if not username:
             raise YardError("username is required")
         if len(password) < self.MIN_PASSWORD_LEN:
-            raise YardError(f"password must be at least {self.MIN_PASSWORD_LEN} characters")
+            raise YardError(
+                f"password must be at least {self.MIN_PASSWORD_LEN} characters"
+            )
         if self.s.scalar(select(User.id).where(User.username == username)):
             raise YardError(f"{username} already exists")
         user = User(username=username, password_hash=hash_password(password), role=role)
@@ -800,7 +1066,9 @@ class UserService:
         from src.auth import hash_password
 
         user = self.get(user_id)
-        if user_id == acting_user_id and (disabled is True or (role is not None and role is not user.role)):
+        if user_id == acting_user_id and (
+            disabled is True or (role is not None and role is not user.role)
+        ):
             raise YardError("you cannot change your own role or disable yourself")
         if role is not None:
             user.role = role
@@ -808,7 +1076,9 @@ class UserService:
             user.disabled = disabled
         if password is not None:
             if len(password) < self.MIN_PASSWORD_LEN:
-                raise YardError(f"password must be at least {self.MIN_PASSWORD_LEN} characters")
+                raise YardError(
+                    f"password must be at least {self.MIN_PASSWORD_LEN} characters"
+                )
             user.password_hash = hash_password(password)
         self.s.commit()
         return user
@@ -820,7 +1090,9 @@ class UserService:
         if user.role is Role.ADMIN:
             others = self.s.scalar(
                 select(func.count(User.id)).where(
-                    User.role == Role.ADMIN, User.disabled.is_(False), User.id != user_id
+                    User.role == Role.ADMIN,
+                    User.disabled.is_(False),
+                    User.id != user_id,
                 )
             )
             if not others:

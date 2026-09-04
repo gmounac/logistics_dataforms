@@ -17,5 +17,6 @@ scratch_*
 *.log
 
 # SQLite (WAL sidecars appear while the app is running)
+*.db
 *.db-wal
 *.db-shm
