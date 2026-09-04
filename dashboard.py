@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.24.0"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="Dashboard")
 
 with app.setup:
     import datetime as dt
